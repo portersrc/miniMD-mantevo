@@ -5,16 +5,17 @@ SHELL = /bin/sh
 
 # System-specific settings
 
-CC =		mpicxx
+CC =		pgc++
 CCFLAGS =	-g -acc -ta=nvidia:cc3x --restrict -O3 -Minfo=accel -DMPICH_IGNORE_CXX_SEEK 
 CCFLAGS +=      -DUSELAYOUTLEFT
+CCFLAGS +=  -I/usr/lib/openmpi/include
 #The Energy calculation crashes currently with both PGI 13.9 and PGI 13.10
 #The compiler reports that it generated a reduction
 #CCFLAGS += -DENABLE_EV_CALCULATION
-LINK =		mpicxx
+LINK =		pgc++
 LINKFLAGS =	-g -acc -ta=nvidia:cc3x -O3 
-USRLIB = 	-lrt
-SYSLIB =	-L/home/projects/pgi/13.10.0/linux86-64/13.10/lib 
+USRLIB = 	-lrt -lmpi_cxx -lmpi -lnuma
+SYSLIB =	-L/usr/lib/openmpi/lib -L/usr/lib/x86_64-linux-gnu
 SIZE =		size
 
 # Check for AVX compile
