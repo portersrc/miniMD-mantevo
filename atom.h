@@ -37,7 +37,8 @@
 
 
 
-static inline int DL(const int &idx0, const int &idx1, const int &n0, const int &n1) {
+static inline
+int DL(const int idx0, const int idx1, const int n0, const int n1) {
 #ifdef USELAYOUTLEFT
   return idx0+idx1*n0;
 #else
@@ -127,7 +128,7 @@ static inline int DS0(const int &n0, const int &n1) {
 #endif 
 }*/
 
-class Neighbor;
+struct Neighbor_s;
 struct Box {
   MMD_float xprd, yprd, zprd;
   MMD_float xlo, xhi;
@@ -135,9 +136,8 @@ struct Box {
   MMD_float zlo, zhi;
 };
 
-class Atom
+typedef struct
 {
-  public:
     int natoms;
     int nlocal, nghost;
     int nmax;
@@ -156,40 +156,39 @@ class Atom
 
     struct Box box;
 
-    Atom();
-    ~Atom();
-    void addatom(MMD_float, MMD_float, MMD_float, MMD_float, MMD_float, MMD_float);
-    void pbc();
-    void growarray();
-
-    void copy(int, int);
-
-    void pack_comm(int, int*, MMD_float*, int*);
-    void unpack_comm(int, int, MMD_float*);
-    void pack_reverse(int, int, MMD_float*);
-    void unpack_reverse(int, int*, MMD_float*);
-
-    int pack_border(int, MMD_float*, int*);
-    int unpack_border(int, MMD_float*);
-    int pack_exchange(int, MMD_float*);
-    int unpack_exchange(int, MMD_float*);
-    int skip_exchange(MMD_float*);
-
-    MMD_float** realloc_2d_MMD_float_array(MMD_float**, int, int, int);
-    MMD_float** create_2d_MMD_float_array(int, int);
-    void destroy_2d_MMD_float_array(MMD_float**);
-
-    void sort(Neighbor & neighbor);
-
-    void sync_device(void* d_ptr, void* h_ptr,int bytes);
-    void sync_host(void* h_ptr, void* d_ptr,int bytes);
-
-  private:
     int* binpos;
     int* bins;
     MMD_float** x_copy;
     MMD_float** v_copy;
     int copy_size;
-};
+}Atom;
+
+void Atom_init(Atom *);
+void Atom_destroy(Atom *);
+void Atom_addatom(Atom *, MMD_float, MMD_float, MMD_float, MMD_float, MMD_float, MMD_float);
+void Atom_pbc(Atom *);
+void Atom_growarray(Atom *);
+
+void Atom_copy(Atom *, int, int);
+
+void Atom_pack_comm(Atom *, int, int*, MMD_float*, int*);
+void Atom_unpack_comm(Atom *, int, int, MMD_float*);
+void Atom_pack_reverse(Atom *, int, int, MMD_float*);
+void Atom_unpack_reverse(Atom *, int, int*, MMD_float*);
+
+int Atom_pack_border(Atom *, int, MMD_float*, int*);
+int Atom_unpack_border(Atom *, int, MMD_float*);
+int Atom_pack_exchange(Atom *, int, MMD_float*);
+int Atom_unpack_exchange(Atom *, int, MMD_float*);
+int Atom_skip_exchange(Atom *, MMD_float*);
+
+MMD_float** Atom_realloc_2d_MMD_float_array(Atom *, MMD_float**, int, int, int);
+MMD_float** Atom_create_2d_MMD_float_array(Atom *, int, int);
+void Atom_destroy_2d_MMD_float_array(Atom *, MMD_float**);
+
+void Atom_sort(Atom *atom, struct Neighbor_s *neighbor);
+
+void Atom_sync_device(Atom *, void* d_ptr, void* h_ptr,int bytes);
+void Atom_sync_host(Atom *, void* h_ptr, void* d_ptr,int bytes);
 
 #endif

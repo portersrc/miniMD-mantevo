@@ -34,7 +34,7 @@
 
 #include "types.h"
 
-struct In {
+typedef struct{
   int nx, ny, nz;
   MMD_float t_request;
   MMD_float rho;
@@ -48,6 +48,6 @@ struct In {
   MMD_float force_cut;
   MMD_float neigh_cut;
   int thermo_nstat;
-};
+}In;
 
 #endif

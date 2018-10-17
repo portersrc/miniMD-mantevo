@@ -37,9 +37,8 @@
 #include "neighbor.h"
 #include "comm.h"
 
-class Force
+typedef struct
 {
-  public:
     MMD_float cutforce;
     MMD_float cutforcesq;
     MMD_float eng_vdwl;
@@ -47,11 +46,6 @@ class Force
     MMD_int evflag;
     MMD_float virial;
 
-    Force() {};
-    virtual ~Force() {};
-    virtual void setup(Atom &atom) {};
-    virtual void finalise() {};
-    virtual void compute(Atom &, Neighbor &, Comm &, int) {};
 
     int use_sse;
     int use_oldcompute;
@@ -62,9 +56,14 @@ class Force
     MMD_float epsilon, sigma6, sigma; //Parameters for LJ only
 
     ForceStyle style;
-  protected:
 
     MMD_int me;
-};
+}Force;
+
+//Force *Force_alloc();
+//void Force_free(Force *);
+//void Force_setup(Force *, Atom *atom);
+//void Force_finalise(Force *);
+//void Force_compute(Force *, Atom *, Neighbor *, Comm *, int);
 
 #endif

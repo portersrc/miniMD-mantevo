@@ -37,9 +37,8 @@
 #include "timer.h"
 #include "threadData.h"
 
-class Integrate
+typedef struct Integrate_s
 {
-  public:
     MMD_float dt;
     MMD_float dtforce;
     MMD_int ntimes;
@@ -49,12 +48,13 @@ class Integrate
 
     MMD_int sort_every;
 
-    Integrate();
-    ~Integrate();
-    void setup();
-    void initialIntegrate();
-    void finalIntegrate();
-    void run(Atom &, Force*, Neighbor &, Comm &, Thermo &, Timer &);
 
     ThreadData* threads;
-};
+}Integrate;
+
+void Integrate_init(Integrate *);
+void Integrate_destroy(Integrate *);
+void Integrate_setup(Integrate *);
+void Integrate_initialIntegrate(Integrate *);
+void Integrate_finalIntegrate(Integrate *);
+void Integrate_run(Integrate *, Atom *, Force*, Neighbor *, Comm *, Thermo *, Timer *);

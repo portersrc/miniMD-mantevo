@@ -30,27 +30,35 @@
 ---------------------------------------------------------------------- */
 //#define PRINTDEBUG(a) a
 #define PRINTDEBUG(a)
+#include <assert.h>
 #include "stdio.h"
 #include "integrate.h"
 #include "openmp.h"
 #include "math.h"
+#include "comm.h"
+#include "force.h"
 
-Integrate::Integrate() {sort_every=20;}
-Integrate::~Integrate() {}
-
-void Integrate::setup()
+void Integrate_init(Integrate *ig)
 {
-  dtforce = 0.5 * dt;
+    ig->sort_every = 20;
+}
+//void Integrate_destroy(Integrate *ig)
+//{
+//}
+
+void Integrate_setup(Integrate *ig)
+{
+    ig->dtforce = 0.5 * ig->dt;
 }
 
-void Integrate::initialIntegrate()
+void Integrate_initialIntegrate(Integrate *ig)
 {
-  const int nlocal_ = nlocal;
-  const MMD_float dt_ = dt;
-  const MMD_float dtforce_ = dtforce;
-  const MMD_float* const restrict f_ = f;
-  MMD_float* const restrict v_ = v;
-  MMD_float* const restrict x_ = x; 
+  const int nlocal_ = ig->nlocal;
+  const MMD_float dt_ = ig->dt;
+  const MMD_float dtforce_ = ig->dtforce;
+  const MMD_float* const restrict f_ = ig->f;
+  MMD_float* const restrict v_ = ig->v;
+  MMD_float* const restrict x_ = ig->x; 
   
   #pragma acc kernels deviceptr(x_,v_,f_)
   for(MMD_int i = 0; i < nlocal_; i++) {
@@ -63,12 +71,12 @@ void Integrate::initialIntegrate()
   }
 }
 
-void Integrate::finalIntegrate()
+void Integrate_finalIntegrate(Integrate *ig)
 {
-  const int nlocal_ = nlocal;
-  const MMD_float dtforce_ = dtforce;
-  const MMD_float* const restrict f_ = f;
-  MMD_float* const restrict v_ = v;
+  const int nlocal_ = ig->nlocal;
+  const MMD_float dtforce_ = ig->dtforce;
+  const MMD_float* const restrict f_ = ig->f;
+  MMD_float* const restrict v_ = ig->v;
   #pragma acc kernels deviceptr(v_,f_)
   for(MMD_int i = 0; i < nlocal_; i++) {
     v_[i * PAD + 0] += dtforce_ * f_[i * PAD + 0];
@@ -77,115 +85,119 @@ void Integrate::finalIntegrate()
   }
 }
 
-void Integrate::run(Atom &atom, Force* force, Neighbor &neighbor,
-                    Comm &comm, Thermo &thermo, Timer &timer)
+void Integrate_run(Integrate *ig, Atom *atom, Force *force, Neighbor *neighbor,
+                    Comm *comm, Thermo *thermo, Timer *timer)
 {
   int i, n;
 
-  comm.timer = &timer;
-  timer.array[TIME_TEST] = 0.0;
+  comm->timer = timer;
+  timer->array[TIME_TEST] = 0.0;
 
-  int check_safeexchange = comm.check_safeexchange;
+  int check_safeexchange = comm->check_safeexchange;
 
-  mass = atom.mass;
-  dtforce = dtforce / mass;
+  ig->mass = atom->mass;
+  ig->dtforce = ig->dtforce / ig->mass;
   //Use OpenMP threads only within the following loop containing the main loop.
   //Do not use OpenMP for setup and postprocessing.
   {
-    int next_sort = sort_every>0?sort_every:ntimes+1;
+    int next_sort = ig->sort_every > 0 ? ig->sort_every : ig->ntimes+1;
 
-    atom.sync_device(atom.d_x,&atom.x[0][0],atom.nmax*3*sizeof(MMD_float));
-    atom.sync_device(atom.d_v,&atom.v[0][0],atom.nmax*3*sizeof(MMD_float));
+    Atom_sync_device(atom, atom->d_x, &atom->x[0][0], atom->nmax*3*sizeof(MMD_float));
+    Atom_sync_device(atom, atom->d_v, &atom->v[0][0], atom->nmax*3*sizeof(MMD_float));
 
-    for(n = 0; n < ntimes; n++) {
-
-      
+    for(n = 0; n < ig->ntimes; n++) {
 
       //x = &atom.x[0][0];
       //v = &atom.v[0][0];
       //f = &atom.f[0][0];
-      x = atom.d_x;
-      v = atom.d_v;
-      f = atom.d_f;
-      xold = &atom.xold[0][0];
-      nlocal = atom.nlocal;
+      ig->x = atom->d_x;
+      ig->v = atom->d_v;
+      ig->f = atom->d_f;
+      ig->xold = &atom->xold[0][0];
+      ig->nlocal = atom->nlocal;
         //atom.sync_host(&atom.x[0][0],atom.d_x,atom.nmax*3*sizeof(MMD_float));
 //for(int i = 0; i<nlocal;i++) printf("A %i %lf %lf %lf\n",i,atom.x[i][0],atom.x[i][1],atom.x[i][2]);
-      initialIntegrate();
+      Integrate_initialIntegrate(ig);
         //atom.sync_host(&atom.x[0][0],atom.d_x,atom.nmax*3*sizeof(MMD_float));
 //for(int i = 0; i<nlocal;i++) printf("B %i %lf %lf %lf\n",i,atom.x[i][0],atom.x[i][1],atom.x[i][2]);
 
       
-      timer.stamp();
+      Timer_stamp(timer);
 
-      if((n + 1) % neighbor.every) {
+      if((n + 1) % neighbor->every) {
         //atom.sync_host(&atom.x[0][0],atom.d_x,atom.nmax*3*sizeof(MMD_float));
 
-        comm.communicate(atom);
+        Comm_communicate(comm, atom);
         //atom.sync_device(atom.d_x,&atom.x[0][0],atom.nmax*3*sizeof(MMD_float));
         
-        timer.stamp(TIME_COMM);
+        Timer_stamp_int(timer, TIME_COMM);
 
       } else {
-        atom.sync_host(&atom.x[0][0],atom.d_x,atom.nmax*3*sizeof(MMD_float));
-        atom.sync_host(&atom.v[0][0],atom.d_v,atom.nmax*3*sizeof(MMD_float));
+        Atom_sync_host(atom, (void *) &atom->x[0][0], (void *)atom->d_x, atom->nmax*3*sizeof(MMD_float));
+        Atom_sync_host(atom, (void *) &atom->v[0][0], (void *)atom->d_v, atom->nmax*3*sizeof(MMD_float));
         {
 
-          timer.stamp_extra_start();
-          comm.exchange(atom);
+          Timer_stamp_extra_start(timer);
+          Comm_exchange(comm, atom);
           if(n+1>=next_sort) {
             //atom.sort(neighbor);
-            next_sort +=  sort_every;
+            next_sort +=  ig->sort_every;
           }
-          comm.borders(atom);
+          Comm_borders(comm, atom);
           
           {
-            timer.stamp_extra_stop(TIME_TEST);
-            timer.stamp(TIME_COMM);
+            Timer_stamp_extra_stop(timer, TIME_TEST);
+            Timer_stamp_int(timer, TIME_COMM);
           }
 
         }
 
-        neighbor.build(atom);
+        Neighbor_build(neighbor, atom);
 
         //atom.sync_device(atom.d_x,&atom.x[0][0],atom.nmax*3*sizeof(MMD_float));
-        atom.sync_device(atom.d_v,&atom.v[0][0],atom.nmax*3*sizeof(MMD_float));
-        timer.stamp(TIME_NEIGH);
+        Atom_sync_device(atom, atom->d_v, &atom->v[0][0], atom->nmax*3*sizeof(MMD_float));
+        Timer_stamp_int(timer, TIME_NEIGH);
       }
-      timer.stamp(TIME_TEST);
-      force->evflag = (n + 1) % thermo.nstat == 0;
-      force->compute(atom, neighbor, comm, comm.me);
+      Timer_stamp_int(timer, TIME_TEST);
+      force->evflag = (n + 1) % thermo->nstat == 0;
+      if(force->style == FORCELJ) {
+        ForceLJ_compute(force, atom, neighbor, comm, comm->me);
+      } else if(force->style == FORCELJ) {
+        ForceEAM_compute(force, atom, neighbor, comm, comm->me);
+      } else{
+        assert(0);
+      }
 //        atom.sync_host(&atom.f[0][0],atom.d_f,atom.nmax*3*sizeof(MMD_float));
 
       
-      timer.stamp(TIME_FORCE);
+      Timer_stamp_int(timer, TIME_FORCE);
 
-      if(neighbor.halfneigh && neighbor.ghost_newton) {
-        atom.sync_host(&atom.f[0][0],atom.d_f,atom.nmax*3*sizeof(MMD_float));
-        comm.reverse_communicate(atom);
+      if(neighbor->halfneigh && neighbor->ghost_newton) {
+        Atom_sync_host(atom, &atom->f[0][0], atom->d_f, atom->nmax*3*sizeof(MMD_float));
+        Comm_reverse_communicate(comm, atom);
 
         
-        timer.stamp(TIME_COMM);
+        Timer_stamp_int(timer, TIME_COMM);
       }
 
       //v = &atom.v[0][0];
       //f = &atom.f[0][0];
-      v = atom.d_v;
-      f = atom.d_f;
-      nlocal = atom.nlocal;
+      ig->v = atom->d_v;
+      ig->f = atom->d_f;
+      ig->nlocal = atom->nlocal;
 
       
         //atom.sync_host(&atom.x[0][0],atom.d_x,atom.nmax*3*sizeof(MMD_float));
 //for(int i = 0; i<nlocal;i++) printf("G %i %lf %lf %lf\n",i,atom.x[i][0],atom.x[i][1],atom.x[i][2]);
-      finalIntegrate();
+      Integrate_finalIntegrate(ig);
         //atom.sync_host(&atom.x[0][0],atom.d_x,atom.nmax*3*sizeof(MMD_float));
 //for(int i = 0; i<nlocal;i++) printf("H %i %lf %lf %lf\n",i,atom.x[i][0],atom.x[i][1],atom.x[i][2]);
-      if(thermo.nstat) {
-        atom.sync_host(&atom.v[0][0],atom.d_v,atom.nmax*3*sizeof(MMD_float));
-        thermo.compute(n + 1, atom, neighbor, force, timer, comm);
+      if(thermo->nstat) {
+        Atom_sync_host(atom, &atom->v[0][0], atom->d_v, atom->nmax*3*sizeof(MMD_float));
+        Thermo_compute(thermo, n + 1, atom, neighbor, force, timer, comm);
       }
     }
   } //end OpenMP parallel
-        atom.sync_host(&atom.v[0][0],atom.d_v,atom.nmax*3*sizeof(MMD_float));
-        atom.sync_host(&atom.x[0][0],atom.d_x,atom.nmax*3*sizeof(MMD_float));
+        Atom_sync_host(atom, &atom->v[0][0], atom->d_v, atom->nmax*3*sizeof(MMD_float));
+        Atom_sync_host(atom, &atom->x[0][0], atom->d_x, atom->nmax*3*sizeof(MMD_float));
 }

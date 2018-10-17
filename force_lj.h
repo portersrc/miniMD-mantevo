@@ -39,26 +39,28 @@
 #include "force.h"
 #include "comm.h"
 
-class ForceLJ : Force
+/*typedef struct
 {
-  public:
 
-    ForceLJ();
-    virtual ~ForceLJ();
-    void setup(Atom & atom);
-    void compute(Atom &, Neighbor &, Comm &, int);
 
-  protected:
-    template<int EVFLAG>
-    void compute_original(Atom &, Neighbor &, int);
-    template<int EVFLAG, int GHOST_NEWTON>
-    void compute_halfneigh(Atom &, Neighbor &, int);
-    template<int EVFLAG, int GHOST_NEWTON>
-    void compute_halfneigh_threaded(Atom &, Neighbor &, int);
 
-    template<int EVFLAG>
-    void compute_fullneigh(Atom &, Neighbor &, int);
+}ForceLJ;*/
 
-};
+typedef Force ForceLJ;
+
+ForceLJ *ForceLJ_alloc();
+void ForceLJ_free(ForceLJ *);
+void ForceLJ_setup(ForceLJ *force, Atom * atom);
+void ForceLJ_compute(ForceLJ *, Atom *, Neighbor *, Comm *, int);
+
+//template<int EVFLAG>
+void ForceLJ_compute_original(ForceLJ *, Atom *, Neighbor *, int, int);
+//template<int EVFLAG, int GHOST_NEWTON>
+void ForceLJ_compute_halfneigh(ForceLJ *, Atom *, Neighbor *, int, int, int);
+//template<int EVFLAG, int GHOST_NEWTON>
+void ForceLJ_compute_halfneigh_threaded(ForceLJ *, Atom *, Neighbor *, int, int, int);
+//template<int EVFLAG>
+void ForceLJ_compute_fullneigh(ForceLJ *, Atom *, Neighbor *, int, int);
 
 #endif
+

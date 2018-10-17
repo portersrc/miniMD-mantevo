@@ -38,71 +38,71 @@
 #define FACTOR 0.999
 #define SMALL 1.0e-6
 
-Neighbor::Neighbor()
+void Neighbor_init(Neighbor *n)
 {
-  ncalls = 0;
-  max_totalneigh = 0;
-  d_numneigh = numneigh = NULL;
-  d_neighbors = neighbors = NULL;
-  maxneighs = 100;
-  nmax = 0;
-  bincount = NULL;
-  bins = NULL;
-  atoms_per_bin = 8;
-  stencil = NULL;
-  threads = NULL;
-  halfneigh = 0;
-  ghost_newton = 1;
+  n->ncalls = 0;
+  n->max_totalneigh = 0;
+  n->d_numneigh = n->numneigh = NULL;
+  n->d_neighbors = n->neighbors = NULL;
+  n->maxneighs = 100;
+  n->nmax = 0;
+  n->bincount = NULL;
+  n->bins = NULL;
+  n->atoms_per_bin = 8;
+  n->stencil = NULL;
+  n->threads = NULL;
+  n->halfneigh = 0;
+  n->ghost_newton = 1;
 }
 
-Neighbor::~Neighbor()
+void Neighbor_destroy(Neighbor *n)
 {
 #ifdef ALIGNMALLOC
-  if(numneigh) _mm_free(numneigh);
-  if(neighbors) _mm_free(neighbors);
+  if(n->numneigh) _mm_free(n->numneigh);
+  if(n->neighbors) _mm_free(n->neighbors);
 #else 
-  if(numneigh) free(numneigh);
-  if(neighbors) free(neighbors);
-  acc_free(d_numneigh);
-  acc_free(d_neighbors);
+  if(n->numneigh) free(n->numneigh);
+  if(n->neighbors) free(n->neighbors);
+  acc_free(n->d_numneigh);
+  acc_free(n->d_neighbors);
 #endif
   
-  if(bincount) free(bincount);
+  if(n->bincount) free(n->bincount);
 
-  if(bins) free(bins);
+  if(n->bins) free(n->bins);
 }
 
 /* binned neighbor list construction with full Newton's 3rd law
    every pair stored exactly once by some processor
    each owned atom i checks its own bin and other bins in Newton stencil */
 
-void Neighbor::build(Atom &atom)
+void Neighbor_build(Neighbor *neighbor, Atom *atom)
 {
-  ncalls++;
-  const int nlocal = atom.nlocal;
-  const int nall = atom.nlocal + atom.nghost;
+  neighbor->ncalls++;
+  const int nlocal = atom->nlocal;
+  const int nall = atom->nlocal + atom->nghost;
   /* extend atom arrays if necessary */
 
   
 
-  if(nall > nmax) {
-    nmax = nall;
+  if(nall > neighbor->nmax) {
+    neighbor->nmax = nall;
 #ifdef ALIGNMALLOC
     if(numneigh) _mm_free(numneigh);
-    numneigh = (int*) _mm_malloc(nmax * sizeof(int) + ALIGNMALLOC, ALIGNMALLOC);
+    numneigh = (int*) _mm_malloc(neighbor->nmax * sizeof(int) + ALIGNMALLOC, ALIGNMALLOC);
     if(neighbors) _mm_free(neighbors);	
-    neighbors = (int*) _mm_malloc(nmax * maxneighs * sizeof(int*) + ALIGNMALLOC, ALIGNMALLOC);	
+    neighbors = (int*) _mm_malloc(neighbor->nmax * maxneighs * sizeof(int*) + ALIGNMALLOC, ALIGNMALLOC);	
 #else
 
-    if(numneigh) free(numneigh);
-    if(neighbors) free(neighbors);
-    acc_free(d_numneigh);
-    acc_free(d_neighbors);   
+    if(neighbor->numneigh) free(neighbor->numneigh);
+    if(neighbor->neighbors) free(neighbor->neighbors);
+    acc_free(neighbor->d_numneigh);
+    acc_free(neighbor->d_neighbors);   
 
-    numneigh = (int*) malloc(nmax * sizeof(int));
-    neighbors = (int*) malloc(nmax * maxneighs * sizeof(int*));
-    d_numneigh = (int*) acc_malloc(nmax * sizeof(int));
-    d_neighbors = (int*) acc_malloc(nmax * maxneighs * sizeof(int*));
+    neighbor->numneigh = (int*) malloc(neighbor->nmax * sizeof(int));
+    neighbor->neighbors = (int*) malloc(neighbor->nmax * neighbor->maxneighs * sizeof(int*));
+    neighbor->d_numneigh = (int*) acc_malloc(neighbor->nmax * sizeof(int));
+    neighbor->d_neighbors = (int*) acc_malloc(neighbor->nmax * neighbor->maxneighs * sizeof(int*));
 #endif
   }
 
@@ -115,52 +115,52 @@ void Neighbor::build(Atom &atom)
 
   
   /* bin local & ghost atoms */
-  binatoms(atom);
-  count = 0;
+  Neighbor_binatoms(neighbor, atom, -1);
+  neighbor->count = 0;
   /* loop over each atom, storing neighbors */
 
 
   int resize[1];
   resize[0] = 1;
-  MMD_float* const restrict x_ = atom.d_x;
-  atom.sync_device(x_,&atom.x[0][0],atom.nmax*PAD*sizeof(MMD_float));
+  MMD_float* const restrict x_ = atom->d_x;
+  Atom_sync_device(atom, x_, &atom->x[0][0], atom->nmax*PAD*sizeof(MMD_float));
   
 
   while(resize[0]) {
     
-    int new_maxneighs = maxneighs;
+    int new_maxneighs = neighbor->maxneighs;
     resize[0] = 0;
     
 
-    int* const restrict neighbors_ = d_neighbors;
-    int* const restrict numneigh_ = d_numneigh;
-    const int* const restrict bins_ = bins;
-    const int* const restrict bincount_ = bincount;
-    const int* const restrict stencil_ = stencil;
+    int* const restrict neighbors_ = neighbor->d_neighbors;
+    int* const restrict numneigh_ = neighbor->d_numneigh;
+    const int* const restrict bins_ = neighbor->bins;
+    const int* const restrict bincount_ = neighbor->bincount;
+    const int* const restrict stencil_ = neighbor->stencil;
     const int nlocal_ = nlocal;
-    const int nmax_ = nmax;
-    const int maxneighs_ = maxneighs;
-    const MMD_float xprd_ = xprd;
-    const MMD_float yprd_ = yprd;
-    const MMD_float zprd_ = zprd;
-    const int nbinx_ = nbinx;
-    const int nbiny_ = nbiny;
-    const int nbinz_ = nbinz;
-    const int mbinx_ = mbinx;
-    const int mbiny_ = mbiny;
-    const int mbinz_ = mbinz;
-    const MMD_float mbinxlo_ = mbinxlo;
-    const MMD_float mbinylo_ = mbinylo;
-    const MMD_float mbinzlo_ = mbinzlo;
-    const MMD_float bininvx_ = bininvx;
-    const MMD_float bininvy_ = bininvy;
-    const MMD_float bininvz_ = bininvz;
-    const int nstencil_ = nstencil; 
-    const int mbins_ = mbins;
-    const int atoms_per_bin_ = atoms_per_bin;
-    const int halfneigh_ = halfneigh;
-    const int ghost_newton_ = ghost_newton;
-    const MMD_float cutneighsq_ = cutneighsq;
+    const int nmax_ = neighbor->nmax;
+    const int maxneighs_ = neighbor->maxneighs;
+    const MMD_float xprd_ = neighbor->xprd;
+    const MMD_float yprd_ = neighbor->yprd;
+    const MMD_float zprd_ = neighbor->zprd;
+    const int nbinx_ = neighbor->nbinx;
+    const int nbiny_ = neighbor->nbiny;
+    const int nbinz_ = neighbor->nbinz;
+    const int mbinx_ = neighbor->mbinx;
+    const int mbiny_ = neighbor->mbiny;
+    const int mbinz_ = neighbor->mbinz;
+    const MMD_float mbinxlo_ = neighbor->mbinxlo;
+    const MMD_float mbinylo_ = neighbor->mbinylo;
+    const MMD_float mbinzlo_ = neighbor->mbinzlo;
+    const MMD_float bininvx_ = neighbor->bininvx;
+    const MMD_float bininvy_ = neighbor->bininvy;
+    const MMD_float bininvz_ = neighbor->bininvz;
+    const int nstencil_ = neighbor->nstencil; 
+    const int mbins_ = neighbor->mbins;
+    const int atoms_per_bin_ = neighbor->atoms_per_bin;
+    const int halfneigh_ = neighbor->halfneigh;
+    const int ghost_newton_ = neighbor->ghost_newton;
+    const MMD_float cutneighsq_ = neighbor->cutneighsq;
 
     #pragma acc kernels deviceptr(x_,numneigh_,neighbors_) copyin(bins_[0:mbins_*atoms_per_bin_],bincount_[0:mbins_],stencil_[0:nstencil_]) copy(resize[0:1])
     for(int i = 0; i < nlocal_; i++) {
@@ -257,15 +257,15 @@ void Neighbor::build(Atom &atom)
     if(resize[0]) {
       
       {
-        maxneighs = new_maxneighs * 1.2;
+        neighbor->maxneighs = new_maxneighs * 1.2;
 #ifdef ALIGNMALLOC
   		_mm_free(neighbors);
   		neighbors = (int*) _mm_malloc(nmax* maxneighs * sizeof(int) + ALIGNMALLOC, ALIGNMALLOC);
 #else
-        free(neighbors);
-        neighbors = (int*) malloc(nmax* maxneighs * sizeof(int));
-        acc_free(d_neighbors);
-        d_neighbors = (int*) acc_malloc(nmax* maxneighs * sizeof(int));
+        free(neighbor->neighbors);
+        neighbor->neighbors = (int*) malloc(neighbor->nmax* neighbor->maxneighs * sizeof(int));
+        acc_free(neighbor->d_neighbors);
+        neighbor->d_neighbors = (int*) acc_malloc(neighbor->nmax* neighbor->maxneighs * sizeof(int));
 #endif
       }
       
@@ -273,52 +273,53 @@ void Neighbor::build(Atom &atom)
   }
 }
 
-void Neighbor::binatoms(Atom &atom, int count)
+void Neighbor_binatoms(Neighbor *neighbor, Atom *atom, int count)
 {
+  
   const int omp_me = omp_get_thread_num();
-  const int num_omp_threads = threads->omp_num_threads;
+  const int num_omp_threads = neighbor->threads->omp_num_threads;
 
-  const int nlocal = atom.nlocal;
-  const int nall = count<0?atom.nlocal + atom.nghost:count;
-  const MMD_float* x = &atom.x[0][0];
+  const int nlocal = atom->nlocal;
+  const int nall = count < 0 ? atom->nlocal + atom->nghost:count;
+  const MMD_float* x = &atom->x[0][0];
 
-  xprd = atom.box.xprd;
-  yprd = atom.box.yprd;
-  zprd = atom.box.zprd;
+  neighbor->xprd = atom->box.xprd;
+  neighbor->yprd = atom->box.yprd;
+  neighbor->zprd = atom->box.zprd;
 
-  resize = 1; 
+  neighbor->resize = 1; 
 
-  while(resize > 0) {
+  while(neighbor->resize > 0) {
     
-    resize = 0;
+    neighbor->resize = 0;
     
     
-    for(int i = 0; i < mbins; i++) bincount[i] = 0;
+    for(int i = 0; i < neighbor->mbins; i++) neighbor->bincount[i] = 0;
 
 
     #pragma omp parallel for 
     for(int i = 0; i < nall; i++) {
-      const int ibin = coord2bin(x[i * PAD + 0], x[i * PAD + 1], x[i * PAD + 2]);
+      const int ibin = Neighbor_coord2bin(neighbor, x[i * PAD + 0], x[i * PAD + 1], x[i * PAD + 2]);
       //printf("%i %i %lf %lf %lf\n",i,ibin,x[i * PAD + 0], x[i * PAD + 1], x[i * PAD + 2]);
-      if(bincount[ibin] < atoms_per_bin) {
+      if(neighbor->bincount[ibin] < neighbor->atoms_per_bin) {
         int ac;
 #ifdef OpenMP31
-        ac = bincount[ibin]++;
+        ac = neighbor->bincount[ibin]++;
 #else
-        ac = __sync_fetch_and_add(bincount + ibin, 1);
+        ac = __sync_fetch_and_add(neighbor->bincount + ibin, 1);
 #endif
-        bins[ibin * atoms_per_bin + ac] = i;
-      } else resize = 1;
+        neighbor->bins[ibin * neighbor->atoms_per_bin + ac] = i;
+      } else neighbor->resize = 1;
     }
 
     // 
 
     
 
-    if(resize) {
-      free(bins);
-      atoms_per_bin *= 2;
-      bins = (int*) malloc(mbins * atoms_per_bin * sizeof(int));
+    if(neighbor->resize) {
+      free(neighbor->bins);
+      neighbor->atoms_per_bin *= 2;
+      neighbor->bins = (int*) malloc(neighbor->mbins * neighbor->atoms_per_bin * sizeof(int));
     }
 
     // 
@@ -332,32 +333,32 @@ void Neighbor::binatoms(Atom &atom, int count)
    take special care to insure ghost atoms with
    coord >= prd or coord < 0.0 are put in correct bins */
 
-inline int Neighbor::coord2bin(MMD_float x, MMD_float y, MMD_float z) const
+inline int Neighbor_coord2bin(Neighbor *neighbor, MMD_float x, MMD_float y, MMD_float z)
 {
   int ix, iy, iz;
 
-  if(x >= xprd)
-    ix = (int)((x - xprd) * bininvx) + nbinx - mbinxlo;
+  if(x >= neighbor->xprd)
+    ix = (int)((x - neighbor->xprd) * neighbor->bininvx) + neighbor->nbinx - neighbor->mbinxlo;
   else if(x >= 0.0)
-    ix = (int)(x * bininvx) - mbinxlo;
+    ix = (int)(x * neighbor->bininvx) - neighbor->mbinxlo;
   else
-    ix = (int)(x * bininvx) - mbinxlo - 1;
+    ix = (int)(x * neighbor->bininvx) - neighbor->mbinxlo - 1;
 
-  if(y >= yprd)
-    iy = (int)((y - yprd) * bininvy) + nbiny - mbinylo;
+  if(y >= neighbor->yprd)
+    iy = (int)((y - neighbor->yprd) * neighbor->bininvy) + neighbor->nbiny - neighbor->mbinylo;
   else if(y >= 0.0)
-    iy = (int)(y * bininvy) - mbinylo;
+    iy = (int)(y * neighbor->bininvy) - neighbor->mbinylo;
   else
-    iy = (int)(y * bininvy) - mbinylo - 1;
+    iy = (int)(y * neighbor->bininvy) - neighbor->mbinylo - 1;
 
-  if(z >= zprd)
-    iz = (int)((z - zprd) * bininvz) + nbinz - mbinzlo;
+  if(z >= neighbor->zprd)
+    iz = (int)((z - neighbor->zprd) * neighbor->bininvz) + neighbor->nbinz - neighbor->mbinzlo;
   else if(z >= 0.0)
-    iz = (int)(z * bininvz) - mbinzlo;
+    iz = (int)(z * neighbor->bininvz) - neighbor->mbinzlo;
   else
-    iz = (int)(z * bininvz) - mbinzlo - 1;
+    iz = (int)(z * neighbor->bininvz) - neighbor->mbinzlo - 1;
 
-  return (iz * mbiny * mbinx + iy * mbinx + ix + 1);
+  return (iz * neighbor->mbiny * neighbor->mbinx + iy * neighbor->mbinx + ix + 1);
 }
 
 
@@ -376,19 +377,19 @@ mbin = number of bins I need in a dimension
 stencil() = bin offsets in 1-d sense for stencil of surrounding bins
 */
 
-int Neighbor::setup(Atom &atom)
+int Neighbor_setup(Neighbor *neighbor, Atom *atom)
 {
   int i, j, k, nmax;
   MMD_float coord;
   int mbinxhi, mbinyhi, mbinzhi;
   int nextx, nexty, nextz;
-  int num_omp_threads = threads->omp_num_threads;
+  int num_omp_threads = neighbor->threads->omp_num_threads;
 
-  cutneighsq = cutneigh * cutneigh;
+  neighbor->cutneighsq = neighbor->cutneigh * neighbor->cutneigh;
 
-  xprd = atom.box.xprd;
-  yprd = atom.box.yprd;
-  zprd = atom.box.zprd;
+  neighbor->xprd = atom->box.xprd;
+  neighbor->yprd = atom->box.yprd;
+  neighbor->zprd = atom->box.zprd;
 
   /*
   c bins must evenly divide into box size,
@@ -405,50 +406,50 @@ int Neighbor::setup(Atom &atom)
   }
   */
 
-  binsizex = xprd / nbinx;
-  binsizey = yprd / nbiny;
-  binsizez = zprd / nbinz;
-  bininvx = 1.0 / binsizex;
-  bininvy = 1.0 / binsizey;
-  bininvz = 1.0 / binsizez;
+  neighbor->binsizex = neighbor->xprd / neighbor->nbinx;
+  neighbor->binsizey = neighbor->yprd / neighbor->nbiny;
+  neighbor->binsizez = neighbor->zprd / neighbor->nbinz;
+  neighbor->bininvx = 1.0 / neighbor->binsizex;
+  neighbor->bininvy = 1.0 / neighbor->binsizey;
+  neighbor->bininvz = 1.0 / neighbor->binsizez;
 
-  coord = atom.box.xlo - cutneigh - SMALL * xprd;
-  mbinxlo = static_cast<int>(coord * bininvx);
+  coord = atom->box.xlo - neighbor->cutneigh - SMALL * neighbor->xprd;
+  neighbor->mbinxlo = (int)(coord * neighbor->bininvx);
 
-  if(coord < 0.0) mbinxlo = mbinxlo - 1;
+  if(coord < 0.0) neighbor->mbinxlo = neighbor->mbinxlo - 1;
 
-  coord = atom.box.xhi + cutneigh + SMALL * xprd;
-  mbinxhi = static_cast<int>(coord * bininvx);
+  coord = atom->box.xhi + neighbor->cutneigh + SMALL * neighbor->xprd;
+  mbinxhi = (int)(coord * neighbor->bininvx);
 
-  coord = atom.box.ylo - cutneigh - SMALL * yprd;
-  mbinylo = static_cast<int>(coord * bininvy);
+  coord = atom->box.ylo - neighbor->cutneigh - SMALL * neighbor->yprd;
+  neighbor->mbinylo = (int)(coord * neighbor->bininvy);
 
-  if(coord < 0.0) mbinylo = mbinylo - 1;
+  if(coord < 0.0) neighbor->mbinylo = neighbor->mbinylo - 1;
 
-  coord = atom.box.yhi + cutneigh + SMALL * yprd;
-  mbinyhi = static_cast<int>(coord * bininvy);
+  coord = atom->box.yhi + neighbor->cutneigh + SMALL * neighbor->yprd;
+  mbinyhi = (int)(coord * neighbor->bininvy);
 
-  coord = atom.box.zlo - cutneigh - SMALL * zprd;
-  mbinzlo = static_cast<int>(coord * bininvz);
+  coord = atom->box.zlo - neighbor->cutneigh - SMALL * neighbor->zprd;
+  neighbor->mbinzlo = (int)(coord * neighbor->bininvz);
 
-  if(coord < 0.0) mbinzlo = mbinzlo - 1;
+  if(coord < 0.0) neighbor->mbinzlo = neighbor->mbinzlo - 1;
 
-  coord = atom.box.zhi + cutneigh + SMALL * zprd;
-  mbinzhi = static_cast<int>(coord * bininvz);
+  coord = atom->box.zhi + neighbor->cutneigh + SMALL * neighbor->zprd;
+  mbinzhi = (int)(coord * neighbor->bininvz);
 
   /* extend bins by 1 in each direction to insure stencil coverage */
 
-  mbinxlo = mbinxlo - 1;
+  neighbor->mbinxlo = neighbor->mbinxlo - 1;
   mbinxhi = mbinxhi + 1;
-  mbinx = mbinxhi - mbinxlo + 1;
+  neighbor->mbinx = mbinxhi - neighbor->mbinxlo + 1;
 
-  mbinylo = mbinylo - 1;
+  neighbor->mbinylo = neighbor->mbinylo - 1;
   mbinyhi = mbinyhi + 1;
-  mbiny = mbinyhi - mbinylo + 1;
+  neighbor->mbiny = mbinyhi - neighbor->mbinylo + 1;
 
-  mbinzlo = mbinzlo - 1;
+  neighbor->mbinzlo = neighbor->mbinzlo - 1;
   mbinzhi = mbinzhi + 1;
-  mbinz = mbinzhi - mbinzlo + 1;
+  neighbor->mbinz = mbinzhi - neighbor->mbinzlo + 1;
 
   /*
   compute bin stencil of all bins whose closest corner to central bin
@@ -462,81 +463,81 @@ int Neighbor::setup(Atom &atom)
   correct-size stencil when there are 3 bins for every 5 lattice spacings
   */
 
-  nextx = static_cast<int>(cutneigh * bininvx);
+  nextx = (int)(neighbor->cutneigh * neighbor->bininvx);
 
-  if(nextx * binsizex < FACTOR * cutneigh) nextx++;
+  if(nextx * neighbor->binsizex < FACTOR * neighbor->cutneigh) nextx++;
 
-  nexty = static_cast<int>(cutneigh * bininvy);
+  nexty = (int)(neighbor->cutneigh * neighbor->bininvy);
 
-  if(nexty * binsizey < FACTOR * cutneigh) nexty++;
+  if(nexty * neighbor->binsizey < FACTOR * neighbor->cutneigh) nexty++;
 
-  nextz = static_cast<int>(cutneigh * bininvz);
+  nextz = (int)(neighbor->cutneigh * neighbor->bininvz);
 
-  if(nextz * binsizez < FACTOR * cutneigh) nextz++;
+  if(nextz * neighbor->binsizez < FACTOR * neighbor->cutneigh) nextz++;
 
   nmax = (2 * nextz + 1) * (2 * nexty + 1) * (2 * nextx + 1);
 
-  if(stencil) free(stencil);
+  if(neighbor->stencil) free(neighbor->stencil);
 
-  stencil = (int*) malloc(nmax * sizeof(int));
+  neighbor->stencil = (int*) malloc(nmax * sizeof(int));
 
-  nstencil = 0;
+  neighbor->nstencil = 0;
   int kstart = -nextz;
 
-  if(halfneigh && ghost_newton) {
+  if(neighbor->halfneigh && neighbor->ghost_newton) {
     kstart = 0;
-    stencil[nstencil++] = 0;
+    neighbor->stencil[neighbor->nstencil++] = 0;
   }
 
   for(k = kstart; k <= nextz; k++) {
     for(j = -nexty; j <= nexty; j++) {
       for(i = -nextx; i <= nextx; i++) {
-        if(!ghost_newton || !halfneigh || (k > 0 || j > 0 || (j == 0 && i > 0)))
-          if(bindist(i, j, k) < cutneighsq) {
-            stencil[nstencil++] = k * mbiny * mbinx + j * mbinx + i;
+        if(!neighbor->ghost_newton || !neighbor->halfneigh || (k > 0 || j > 0 || (j == 0 && i > 0)))
+          if(Neighbor_bindist(neighbor, i, j, k) < neighbor->cutneighsq) {
+            neighbor->stencil[neighbor->nstencil++] = k * neighbor->mbiny * neighbor->mbinx + j * neighbor->mbinx + i;
           }
       }
     }
   }
 
-  mbins = mbinx * mbiny * mbinz;
+  neighbor->mbins = neighbor->mbinx * neighbor->mbiny * neighbor->mbinz;
 
-  if(bincount) free(bincount);
+  if(neighbor->bincount) free(neighbor->bincount);
 
-  bincount = (int*) malloc(mbins * num_omp_threads * sizeof(int));
+  neighbor->bincount = (int*) malloc(neighbor->mbins * num_omp_threads * sizeof(int));
 
-  if(bins) free(bins);
+  if(neighbor->bins) free(neighbor->bins);
 
-  bins = (int*) malloc(mbins * num_omp_threads * atoms_per_bin * sizeof(int));
+  neighbor->bins = (int*) malloc(neighbor->mbins * num_omp_threads * neighbor->atoms_per_bin * sizeof(int));
   return 0;
 }
 
 /* compute closest distance between central bin (0,0,0) and bin (i,j,k) */
 
-MMD_float Neighbor::bindist(int i, int j, int k)
+MMD_float Neighbor_bindist(Neighbor *neighbor, int i, int j, int k)
 {
   MMD_float delx, dely, delz;
 
   if(i > 0)
-    delx = (i - 1) * binsizex;
+    delx = (i - 1) * neighbor->binsizex;
   else if(i == 0)
     delx = 0.0;
   else
-    delx = (i + 1) * binsizex;
+    delx = (i + 1) * neighbor->binsizex;
 
   if(j > 0)
-    dely = (j - 1) * binsizey;
+    dely = (j - 1) * neighbor->binsizey;
   else if(j == 0)
     dely = 0.0;
   else
-    dely = (j + 1) * binsizey;
+    dely = (j + 1) * neighbor->binsizey;
 
   if(k > 0)
-    delz = (k - 1) * binsizez;
+    delz = (k - 1) * neighbor->binsizez;
   else if(k == 0)
     delz = 0.0;
   else
-    delz = (k + 1) * binsizez;
+    delz = (k + 1) * neighbor->binsizez;
 
   return (delx * delx + dely * dely + delz * delz);
 }

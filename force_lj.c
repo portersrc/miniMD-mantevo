@@ -38,66 +38,92 @@
 #define VECTORLENGTH 4
 #endif
 
-ForceLJ::ForceLJ()
+ForceLJ *ForceLJ_alloc()
 {
-  cutforce = 0.0;
-  cutforcesq = 0.0;
-  use_oldcompute = 0;
-  reneigh = 1;
-  style = FORCELJ;
+  ForceLJ *forceLJ = (ForceLJ *) malloc(sizeof(ForceLJ));
+  forceLJ->cutforce = 0.0;
+  forceLJ->cutforcesq = 0.0;
+  forceLJ->use_oldcompute = 0;
+  forceLJ->reneigh = 1;
+  forceLJ->style = FORCELJ;
 
-  epsilon = 1.0;
-  sigma6 = 1.0;
-  sigma = 1.0;
-
+  forceLJ->epsilon = 1.0;
+  forceLJ->sigma6 = 1.0;
+  forceLJ->sigma = 1.0;
+  return forceLJ;
 }
-ForceLJ::~ForceLJ() {}
-
-void ForceLJ::setup(Atom &atom)
+void ForceLJ_free(ForceLJ *f)
 {
-  cutforcesq = cutforce * cutforce;
+    free(f);
+}
+
+void ForceLJ_setup(ForceLJ *force_lj, Atom *atom)
+{
+  force_lj->cutforcesq = force_lj->cutforce *force_lj->cutforce;
 }
 
 
-void ForceLJ::compute(Atom &atom, Neighbor &neighbor, Comm &comm, int me)
+void ForceLJ_compute(ForceLJ *force_lj, Atom *atom, Neighbor *neighbor, Comm *comm, int me)
 {
-  eng_vdwl = 0;
-  virial = 0;
+  force_lj->eng_vdwl = 0;
+  force_lj->virial = 0;
 
-  if(evflag) {
-    if(use_oldcompute)
-      return compute_original<1>(atom, neighbor, me);
+  if(force_lj->evflag) {
+    if(force_lj->use_oldcompute) {
+      ForceLJ_compute_original(force_lj, atom, neighbor, me, 1);
+      return;
+    }
 
-    if(neighbor.halfneigh) {
-      if(neighbor.ghost_newton) {
-        if(threads->omp_num_threads > 1)
-          return compute_halfneigh_threaded<1, 1>(atom, neighbor, me);
-        else
-          return compute_halfneigh<1, 1>(atom, neighbor, me);
+    if(neighbor->halfneigh) {
+      if(neighbor->ghost_newton) {
+        if(force_lj->threads->omp_num_threads > 1) {
+          ForceLJ_compute_halfneigh_threaded(force_lj, atom, neighbor, me, 1, 1);
+          return;
+        }else{
+          ForceLJ_compute_halfneigh(force_lj, atom, neighbor, me, 1, 1);
+          return;
+        }
       } else {
-        if(threads->omp_num_threads > 1)
-          return compute_halfneigh_threaded<1, 0>(atom, neighbor, me);
-        else
-          return compute_halfneigh<1, 0>(atom, neighbor, me);
+        if(force_lj->threads->omp_num_threads > 1) {
+          ForceLJ_compute_halfneigh_threaded(force_lj, atom, neighbor, me, 1, 0);
+          return;
+        }else{
+          ForceLJ_compute_halfneigh(force_lj, atom, neighbor, me, 1, 0);
+          return;
+        }
       }
-    } else return compute_fullneigh<1>(atom, neighbor, me);
+    } else {
+      ForceLJ_compute_fullneigh(force_lj, atom, neighbor, me, 1);
+      return;
+    }
   } else {
-    if(use_oldcompute)
-      return compute_original<0>(atom, neighbor, me);
+    if(force_lj->use_oldcompute) {
+      ForceLJ_compute_original(force_lj, atom, neighbor, me, 0);
+      return;
+    }
 
-    if(neighbor.halfneigh) {
-      if(neighbor.ghost_newton) {
-        if(threads->omp_num_threads > 1)
-          return compute_halfneigh_threaded<0, 1>(atom, neighbor, me);
-        else
-          return compute_halfneigh<0, 1>(atom, neighbor, me);
+    if(neighbor->halfneigh) {
+      if(neighbor->ghost_newton) {
+        if(force_lj->threads->omp_num_threads > 1) {
+          ForceLJ_compute_halfneigh_threaded(force_lj, atom, neighbor, me, 0, 1);
+          return;
+        } else {
+          ForceLJ_compute_halfneigh(force_lj, atom, neighbor, me, 0, 1);
+          return;
+        }
       } else {
-        if(threads->omp_num_threads > 1)
-          return compute_halfneigh_threaded<0, 0>(atom, neighbor, me);
-        else
-          return compute_halfneigh<0, 0>(atom, neighbor, me);
+        if(force_lj->threads->omp_num_threads > 1) {
+          ForceLJ_compute_halfneigh_threaded(force_lj, atom, neighbor, me, 0, 0);
+          return;
+        } else {
+          ForceLJ_compute_halfneigh(force_lj, atom, neighbor, me, 0, 0);
+          return;
+        }
       }
-    } else return compute_fullneigh<0>(atom, neighbor, me);
+    } else {
+      ForceLJ_compute_fullneigh(force_lj, atom, neighbor, me, 0);
+      return;
+    }
 
   }
 }
@@ -105,8 +131,8 @@ void ForceLJ::compute(Atom &atom, Neighbor &neighbor, Comm &comm, int me)
 //original version of force compute in miniMD
 //  -MPI only
 //  -not vectorizable
-template<int EVFLAG>
-void ForceLJ::compute_original(Atom &atom, Neighbor &neighbor, int me)
+//template<int EVFLAG>
+void ForceLJ_compute_original(ForceLJ *force_lj, Atom *atom, Neighbor *neighbor, int me, int EVFLAG)
 {
   int i, j, k, nlocal, nall, numneigh;
   MMD_float xtmp, ytmp, ztmp, delx, dely, delz, rsq;
@@ -114,13 +140,13 @@ void ForceLJ::compute_original(Atom &atom, Neighbor &neighbor, int me)
   int* neighs;
   MMD_float** x, **f;
 
-  nlocal = atom.nlocal;
-  nall = atom.nlocal + atom.nghost;
-  x = atom.x;
-  f = atom.f;
+  nlocal = atom->nlocal;
+  nall = atom->nlocal + atom->nghost;
+  x = atom->x;
+  f = atom->f;
 
-  eng_vdwl = 0;
-  virial = 0;
+  force_lj->eng_vdwl = 0;
+  force_lj->virial = 0;
   // clear force on own and ghost atoms
 
   for(i = 0; i < nall; i++) {
@@ -133,8 +159,8 @@ void ForceLJ::compute_original(Atom &atom, Neighbor &neighbor, int me)
   // store force on both atoms i and j
 
   for(i = 0; i < nlocal; i++) {
-    neighs = &neighbor.neighbors[i * neighbor.maxneighs];
-    numneigh = neighbor.numneigh[i];
+    neighs = &neighbor->neighbors[i * neighbor->maxneighs];
+    numneigh = neighbor->numneigh[i];
     xtmp = x[i][0];
     ytmp = x[i][1];
     ztmp = x[i][2];
@@ -146,10 +172,10 @@ void ForceLJ::compute_original(Atom &atom, Neighbor &neighbor, int me)
       delz = ztmp - x[j][2];
       rsq = delx * delx + dely * dely + delz * delz;
 
-      if(rsq < cutforcesq) {
+      if(rsq < force_lj->cutforcesq) {
         sr2 = 1.0 / rsq;
-        sr6 = sr2 * sr2 * sr2 * sigma6;
-        force = 48.0 * sr6 * (sr6 - 0.5) * sr2 * epsilon;
+        sr6 = sr2 * sr2 * sr2 * force_lj->sigma6;
+        force = 48.0 * sr6 * (sr6 - 0.5) * sr2 * force_lj->epsilon;
         f[i][0] += delx * force;
         f[i][1] += dely * force;
         f[i][2] += delz * force;
@@ -158,8 +184,8 @@ void ForceLJ::compute_original(Atom &atom, Neighbor &neighbor, int me)
         f[j][2] -= delz * force;
 
         if(EVFLAG) {
-          eng_vdwl += (4.0 * sr6 * (sr6 - 1.0)) * epsilon;
-          virial += (delx * delx + dely * dely + delz * delz) * force;
+          force_lj->eng_vdwl += (4.0 * sr6 * (sr6 - 1.0)) * force_lj->epsilon;
+          force_lj->virial += (delx * delx + dely * dely + delz * delz) * force;
         }
       }
     }
@@ -173,16 +199,16 @@ void ForceLJ::compute_original(Atom &atom, Neighbor &neighbor, int me)
 //  -enables vectorization by:
 //     -getting rid of 2d pointers
 //     -use pragma simd to force vectorization of inner loop
-template<int EVFLAG, int GHOST_NEWTON>
-void ForceLJ::compute_halfneigh(Atom &atom, Neighbor &neighbor, int me)
+//template<int EVFLAG, int GHOST_NEWTON>
+void ForceLJ_compute_halfneigh(ForceLJ *force_lj, Atom *atom, Neighbor *neighbor, int me, int EVFLAG, int GHOST_NEWTON)
 {
   int* neighs;
   int tid = omp_get_thread_num();
 
-  const int nlocal = atom.nlocal;
-  const int nall = atom.nlocal + atom.nghost;
-  MMD_float* x = &atom.x[0][0];
-  MMD_float* f = &atom.f[0][0];
+  const int nlocal = atom->nlocal;
+  const int nall = atom->nlocal + atom->nghost;
+  MMD_float* x = &atom->x[0][0];
+  MMD_float* f = &atom->f[0][0];
 
   // clear force on own and ghost atoms
   for(int i = 0; i < nall; i++) {
@@ -197,8 +223,8 @@ void ForceLJ::compute_halfneigh(Atom &atom, Neighbor &neighbor, int me)
   MMD_float t_virial = 0;
 
   for(int i = 0; i < nlocal; i++) {
-    neighs = &neighbor.neighbors[i * neighbor.maxneighs];
-    const int numneighs = neighbor.numneigh[i];
+    neighs = &neighbor->neighbors[i * neighbor->maxneighs];
+    const int numneighs = neighbor->numneigh[i];
     const MMD_float xtmp = x[i * PAD + 0];
     const MMD_float ytmp = x[i * PAD + 1];
     const MMD_float ztmp = x[i * PAD + 2];
@@ -217,10 +243,10 @@ void ForceLJ::compute_halfneigh(Atom &atom, Neighbor &neighbor, int me)
       const MMD_float delz = ztmp - x[j * PAD + 2];
       const MMD_float rsq = delx * delx + dely * dely + delz * delz;
 
-      if(rsq < cutforcesq) {
+      if(rsq < force_lj->cutforcesq) {
         const MMD_float sr2 = 1.0 / rsq;
-        const MMD_float sr6 = sr2 * sr2 * sr2 * sigma6;
-        const MMD_float force = 48.0 * sr6 * (sr6 - 0.5) * sr2 * epsilon;
+        const MMD_float sr6 = sr2 * sr2 * sr2 * force_lj->sigma6;
+        const MMD_float force = 48.0 * sr6 * (sr6 - 0.5) * sr2 * force_lj->epsilon;
 
         fix += delx * force;
         fiy += dely * force;
@@ -234,7 +260,7 @@ void ForceLJ::compute_halfneigh(Atom &atom, Neighbor &neighbor, int me)
 
         if(EVFLAG) {
           const MMD_float scale = (GHOST_NEWTON || j < nlocal) ? 1.0 : 0.5;
-          t_energy += scale * (4.0 * sr6 * (sr6 - 1.0)) * epsilon;
+          t_energy += scale * (4.0 * sr6 * (sr6 - 1.0)) * force_lj->epsilon;
           t_virial += scale * (delx * delx + dely * dely + delz * delz) * force;
         }
 
@@ -247,8 +273,8 @@ void ForceLJ::compute_halfneigh(Atom &atom, Neighbor &neighbor, int me)
 
   }
 
-  eng_vdwl += t_energy;
-  virial += t_virial;
+  force_lj->eng_vdwl += t_energy;
+  force_lj->virial += t_virial;
 
 }
 
@@ -258,8 +284,8 @@ void ForceLJ::compute_halfneigh(Atom &atom, Neighbor &neighbor, int me)
 //  -enables vectorization by:
 //    -getting rid of 2d pointers
 //    -use pragma simd to force vectorization of inner loop (not currently supported due to OpenMP atomics
-template<int EVFLAG, int GHOST_NEWTON>
-void ForceLJ::compute_halfneigh_threaded(Atom &atom, Neighbor &neighbor, int me)
+//template<int EVFLAG, int GHOST_NEWTON>
+void ForceLJ_compute_halfneigh_threaded(ForceLJ *force_lj, Atom *atom, Neighbor *neighbor, int me, int EVFLAG, int GHOST_NEWTON)
 {
   int nlocal, nall;
   int* neighs;
@@ -269,10 +295,10 @@ void ForceLJ::compute_halfneigh_threaded(Atom &atom, Neighbor &neighbor, int me)
   MMD_float t_eng_vdwl = 0;
   MMD_float t_virial = 0;
 
-  nlocal = atom.nlocal;
-  nall = atom.nlocal + atom.nghost;
-  x = &atom.x[0][0];
-  f = &atom.f[0][0];
+  nlocal = atom->nlocal;
+  nall = atom->nlocal + atom->nghost;
+  x = &atom->x[0][0];
+  f = &atom->f[0][0];
 
   
   // clear force on own and ghost atoms
@@ -289,8 +315,8 @@ void ForceLJ::compute_halfneigh_threaded(Atom &atom, Neighbor &neighbor, int me)
 
   
   for(int i = 0; i < nlocal; i++) {
-    neighs = &neighbor.neighbors[i * neighbor.maxneighs];
-    const int numneighs = neighbor.numneigh[i];
+    neighs = &neighbor->neighbors[i * neighbor->maxneighs];
+    const int numneighs = neighbor->numneigh[i];
     const MMD_float xtmp = x[i * PAD + 0];
     const MMD_float ytmp = x[i * PAD + 1];
     const MMD_float ztmp = x[i * PAD + 2];
@@ -305,10 +331,10 @@ void ForceLJ::compute_halfneigh_threaded(Atom &atom, Neighbor &neighbor, int me)
       const MMD_float delz = ztmp - x[j * PAD + 2];
       const MMD_float rsq = delx * delx + dely * dely + delz * delz;
 
-      if(rsq < cutforcesq) {
+      if(rsq < force_lj->cutforcesq) {
         const MMD_float sr2 = 1.0 / rsq;
-        const MMD_float sr6 = sr2 * sr2 * sr2 * sigma6;
-        const MMD_float force = 48.0 * sr6 * (sr6 - 0.5) * sr2 * epsilon;
+        const MMD_float sr6 = sr2 * sr2 * sr2 * force_lj->sigma6;
+        const MMD_float force = 48.0 * sr6 * (sr6 - 0.5) * sr2 * force_lj->epsilon;
 
         fix += delx * force;
         fiy += dely * force;
@@ -325,7 +351,7 @@ void ForceLJ::compute_halfneigh_threaded(Atom &atom, Neighbor &neighbor, int me)
 
         if(EVFLAG) {
           const MMD_float scale = (GHOST_NEWTON || j < nlocal) ? 1.0 : 0.5;
-          t_eng_vdwl += scale * (4.0 * sr6 * (sr6 - 1.0)) * epsilon;
+          t_eng_vdwl += scale * (4.0 * sr6 * (sr6 - 1.0)) * force_lj->epsilon;
           t_virial += scale * (delx * delx + dely * dely + delz * delz) * force;
         }
       }
@@ -340,9 +366,9 @@ void ForceLJ::compute_halfneigh_threaded(Atom &atom, Neighbor &neighbor, int me)
   }
 
   
-  eng_vdwl += t_eng_vdwl;
+  force_lj->eng_vdwl += t_eng_vdwl;
   
-  virial += t_virial;
+  force_lj->virial += t_virial;
 
   
 }
@@ -354,23 +380,23 @@ void ForceLJ::compute_halfneigh_threaded(Atom &atom, Neighbor &neighbor, int me)
 //  -enables vectorization by:
 //    -get rid of 2d pointers
 //    -use pragma simd to force vectorization of inner loop
-template<int EVFLAG>
-void ForceLJ::compute_fullneigh(Atom &atom, Neighbor &neighbor, int me)
+//template<int EVFLAG>
+void ForceLJ_compute_fullneigh(ForceLJ *force_lj, Atom *atom, Neighbor *neighbor, int me, int EVFLAG)
 {
   //int tid = omp_get_thread_num();
 
-  const int nlocal = atom.nlocal;
-  const int nall = atom.nlocal + atom.nghost;
-  const MMD_float* const restrict x = atom.d_x; //&atom.x[0][0];
+  const int nlocal = atom->nlocal;
+  const int nall = atom->nlocal + atom->nghost;
+  const MMD_float* const restrict x = atom->d_x; //&atom.x[0][0];
   //MMD_float* const restrict f = &atom.f[0][0];
-  MMD_float* const restrict f = atom.d_f;
-  const int* const restrict neighbors = neighbor.d_neighbors;
-  const int* const restrict numneigh = neighbor.d_numneigh;
-  const int maxneighs = neighbor.maxneighs;
-  const MMD_float sigma6_ = sigma6;
-  const MMD_float epsilon_ = epsilon;
-  const MMD_float cutforcesq_ = cutforcesq;
-  const int nmax = neighbor.nmax;
+  MMD_float* const restrict f = atom->d_f;
+  const int* const restrict neighbors = neighbor->d_neighbors;
+  const int* const restrict numneigh = neighbor->d_numneigh;
+  const int maxneighs = neighbor->maxneighs;
+  const MMD_float sigma6_ = force_lj->sigma6;
+  const MMD_float epsilon_ = force_lj->epsilon;
+  const MMD_float cutforcesq_ = force_lj->cutforcesq;
+  const int nmax = neighbor->nmax;
 
   // clear force on own and ghost atoms
 
@@ -434,8 +460,8 @@ void ForceLJ::compute_fullneigh(Atom &atom, Neighbor &neighbor, int me)
   }
   t_eng_vdwl *= 4.0;
   t_virial *= 0.5;
-  eng_vdwl += t_eng_vdwl;
-  virial += t_virial;
+  force_lj->eng_vdwl += t_eng_vdwl;
+  force_lj->virial += t_virial;
 }
 
   

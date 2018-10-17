@@ -32,20 +32,23 @@
 #ifndef THREADDATA_H
 #define THREADDATA_H
 
-class ThreadData
+typedef struct
 {
-  public:
-    ThreadData() {
-      mpi_me = 0;
-      mpi_num_threads = 0;
-      omp_me = 0;
-      omp_num_threads = 1;
-    };
-    ~ThreadData() {};
     int mpi_me;
     int mpi_num_threads;
     int omp_me;
     int omp_num_threads;
-};
+}ThreadData;
+
+// FIXME: manually inlined in ljs.c
+//void ThreadData_init(ThreadData *td)
+//{
+//  td->mpi_me = 0;
+//  td->mpi_num_threads = 0;
+//  td->omp_me = 0;
+//  td->omp_num_threads = 1;
+//}
+//void ThreadData_destroy(ThreadData *);
 
 #endif
+

@@ -29,9 +29,9 @@
    Please read the accompanying README and LICENSE files.
 ---------------------------------------------------------------------- */
 
-#include <cstdlib>
-#include <cstdio>
-#include <cstring>
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
 #include "mpi.h"
 
 #include "ljs.h"
@@ -45,7 +45,7 @@
 
 #define MAXLINE 256
 
-int input(In &in, char* filename)
+int input(In *in, char* filename)
 {
   FILE* fp;
   int flag;
@@ -125,8 +125,8 @@ int input(In &in, char* filename)
       fgets(line, MAXLINE, fp);
       fgets(line, MAXLINE, fp);
 
-      if(strcmp(strtok(line, " \t\n"), "lj") == 0) in.units = 0;
-      else if(strcmp(line, "metal") == 0) in.units = 1;
+      if(strcmp(strtok(line, " \t\n"), "lj") == 0) in->units = 0;
+      else if(strcmp(line, "metal") == 0) in->units = 1;
       else {
         printf("Unknown units option in file at line 3 ('%s'). Expecting either 'lj' or 'metal'.\n", line);
         MPI_Finalize();
@@ -135,20 +135,20 @@ int input(In &in, char* filename)
 
       fgets(line, MAXLINE, fp);
 
-      if(strcmp(strtok(line, " \t\n"), "none") == 0) in.datafile = NULL;
+      if(strcmp(strtok(line, " \t\n"), "none") == 0) in->datafile = NULL;
       else {
-        in.datafile = new char[1000];
+        in->datafile = malloc(sizeof(char) * 1000);
         char* ptr = strtok(line, " \t");
 
         if(ptr == NULL) ptr = line;
 
-        strcpy(in.datafile, ptr);
+        strcpy(in->datafile, ptr);
       }
 
       fgets(line, MAXLINE, fp);
 
-      if(strcmp(strtok(line, " \t\n"), "lj") == 0) in.forcetype = FORCELJ;
-      else if(strcmp(line, "eam") == 0) in.forcetype = FORCEEAM;
+      if(strcmp(strtok(line, " \t\n"), "lj") == 0) in->forcetype = FORCELJ;
+      else if(strcmp(line, "eam") == 0) in->forcetype = FORCEEAM;
       else {
         printf("Unknown forcetype option in file at line 5 ('%s'). Expecting either 'lj' or 'eam'.\n", line);
         MPI_Finalize();
@@ -156,23 +156,23 @@ int input(In &in, char* filename)
       }
 
       fgets(line, MAXLINE, fp);
-      sscanf(line, "%le %le", &in.epsilon, &in.sigma);
+      sscanf(line, "%le %le", &in->epsilon, &in->sigma);
       fgets(line, MAXLINE, fp);
-      sscanf(line, "%d %d %d", &in.nx, &in.ny, &in.nz);
+      sscanf(line, "%d %d %d", &in->nx, &in->ny, &in->nz);
       fgets(line, MAXLINE, fp);
-      sscanf(line, "%d", &in.ntimes);
+      sscanf(line, "%d", &in->ntimes);
       fgets(line, MAXLINE, fp);
-      sscanf(line, "%le", &in.dt);
+      sscanf(line, "%le", &in->dt);
       fgets(line, MAXLINE, fp);
-      sscanf(line, "%le", &in.t_request);
+      sscanf(line, "%le", &in->t_request);
       fgets(line, MAXLINE, fp);
-      sscanf(line, "%le", &in.rho);
+      sscanf(line, "%le", &in->rho);
       fgets(line, MAXLINE, fp);
-      sscanf(line, "%d", &in.neigh_every);
+      sscanf(line, "%d", &in->neigh_every);
       fgets(line, MAXLINE, fp);
-      sscanf(line, "%le %le", &in.force_cut, &in.neigh_cut);
+      sscanf(line, "%le %le", &in->force_cut, &in->neigh_cut);
       fgets(line, MAXLINE, fp);
-      sscanf(line, "%d", &in.thermo_nstat);
+      sscanf(line, "%d", &in->thermo_nstat);
       fclose(fp);
 #else
       if(me == 0)
@@ -180,7 +180,7 @@ int input(In &in, char* filename)
 #endif
 #endif
 
-  in.neigh_cut += in.force_cut;
+  in->neigh_cut += in->force_cut;
   MPI_Barrier(MPI_COMM_WORLD);
 
   return 0;

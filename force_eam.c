@@ -47,86 +47,93 @@
 
 /* ---------------------------------------------------------------------- */
 
-ForceEAM::ForceEAM()
+ForceEAM *ForceEAM_alloc()
 {
-  cutforce = 0.0;
-  cutforcesq = 0.0;
-  use_oldcompute = 0;
+  ForceEAM *f = (ForceEAM *) malloc(sizeof(ForceEAM));
+  f->cutforce = 0.0;
+  f->cutforcesq = 0.0;
+  f->use_oldcompute = 0;
 
-  nmax = 0;
+  f->nmax = 0;
 
-  rho = 0;
-  d_fp = fp = 0;
-  style = FORCEEAM;
+  f->rho = 0;
+  f->d_fp = f->fp = 0;
+  f->style = FORCEEAM;
+
+  return f;
 }
 
 /* ----------------------------------------------------------------------
    check if allocated, since class can be destructed when incomplete
 ------------------------------------------------------------------------- */
 
-ForceEAM::~ForceEAM()
+void ForceEAM_free(ForceEAM *f)
 {
-
+  free(f);
 }
 
-void ForceEAM::setup(Atom & atom)
+void ForceEAM_setup(ForceEAM *force_eam, Atom *atom)
 {
-  me = threads->mpi_me;
-  coeff("Cu_u6.eam");
-  init_style(atom);
+  force_eam->me = force_eam->threads->mpi_me;
+  ForceEAM_coeff(force_eam, "Cu_u6.eam");
+  ForceEAM_init_style(force_eam, atom);
 }
 
 
-void ForceEAM::compute(Atom &atom, Neighbor &neighbor, Comm &comm, int me)
+void ForceEAM_compute(ForceEAM *force_eam, Atom *atom, Neighbor *neighbor, Comm *comm, int me)
 {
-  if(neighbor.halfneigh) {
-    if(threads->omp_num_threads > 1)
+  if(neighbor->halfneigh) {
+    if(force_eam->threads->omp_num_threads > 1) {
       return ;
-    else
-      return compute_halfneigh(atom, neighbor, comm, me);
-  } else return compute_fullneigh(atom, neighbor, comm, me);
-
+    } else {
+      ForceEAM_compute_halfneigh(force_eam, atom, neighbor, comm, me);
+      return;
+    }
+  } else {
+    ForceEAM_compute_fullneigh(force_eam, atom, neighbor, comm, me);
+    return;
+  }
 }
 /* ---------------------------------------------------------------------- */
 
-void ForceEAM::compute_halfneigh(Atom &atom, Neighbor &neighbor, Comm &comm, int me)
+void ForceEAM_compute_halfneigh(ForceEAM *force_eam, Atom *atom, Neighbor *neighbor, Comm *comm, int me)
 {
 
   MMD_float evdwl = 0.0;
 
-  virial = 0;
+  force_eam->virial = 0;
   // grow energy and fp arrays if necessary
   // need to be atom->nmax in length
 
-  if(atom.nmax > nmax) {
-    nmax = atom.nmax;
-    delete [] rho;
-    delete [] fp;
+  if(atom->nmax > force_eam->nmax) {
+    force_eam->nmax = atom->nmax;
+    free(force_eam->rho);
+    free(force_eam->fp);
 
-    rho = new MMD_float[nmax];
-    fp = new MMD_float[nmax];
+    force_eam->rho = (MMD_float *) malloc(sizeof(MMD_float) * force_eam->nmax);
+    force_eam->fp  = (MMD_float *) malloc(sizeof(MMD_float) * force_eam->nmax);
   }
 
-  MMD_float* x = &atom.x[0][0];
-  MMD_float* f = &atom.f[0][0];
-  const int nlocal = atom.nlocal;
+  MMD_float* x = &atom->x[0][0];
+  MMD_float* f = &atom->f[0][0];
+  const int nlocal = atom->nlocal;
 
   // zero out density
 
-  for(int i = 0; i < atom.nlocal + atom.nghost; i++) {
+  for(int i = 0; i < atom->nlocal + atom->nghost; i++) {
     f[i * PAD + 0] = 0;
     f[i * PAD + 1] = 0;
     f[i * PAD + 2] = 0;
   }
 
-  for(MMD_int i = 0; i < nlocal; i++) rho[i] = 0.0;
+  for(MMD_int i = 0; i < nlocal; i++) force_eam->rho[i] = 0.0;
 
   // rho = density at each atom
   // loop over neighbors of my atoms
 
   for(MMD_int i = 0; i < nlocal; i++) {
-    int* neighs = &neighbor.neighbors[i * neighbor.maxneighs];
-    const int numneigh = neighbor.numneigh[i];
+    int* neighs = &neighbor->neighbors[i * neighbor->maxneighs];
+    const int numneigh = neighbor->numneigh[i];
     const MMD_float xtmp = x[i * PAD + 0];
     const MMD_float ytmp = x[i * PAD + 1];
     const MMD_float ztmp = x[i * PAD + 2];
@@ -140,51 +147,51 @@ void ForceEAM::compute_halfneigh(Atom &atom, Neighbor &neighbor, Comm &comm, int
       const MMD_float delz = ztmp - x[j * PAD + 2];
       const MMD_float rsq = delx * delx + dely * dely + delz * delz;
 
-      if(rsq < cutforcesq) {
-        MMD_float p = sqrt(rsq) * rdr + 1.0;
-        MMD_int m = static_cast<int>(p);
-        m = m < nr - 1 ? m : nr - 1;
+      if(rsq < force_eam->cutforcesq) {
+        MMD_float p = sqrt(rsq) * force_eam->rdr + 1.0;
+        MMD_int m = (int)(p);
+        m = m < force_eam->nr - 1 ? m : force_eam->nr - 1;
         p -= m;
         p = p < 1.0 ? p : 1.0;
 
-        rhoi += ((rhor_spline[m * 7 + 3] * p + rhor_spline[m * 7 + 4]) * p + rhor_spline[m * 7 + 5]) * p + rhor_spline[m * 7 + 6];
+        rhoi += ((force_eam->rhor_spline[m * 7 + 3] * p + force_eam->rhor_spline[m * 7 + 4]) * p + force_eam->rhor_spline[m * 7 + 5]) * p + force_eam->rhor_spline[m * 7 + 6];
 
         if(j < nlocal) {
-          rho[j] += ((rhor_spline[m * 7 + 3] * p + rhor_spline[m * 7 + 4]) * p + rhor_spline[m * 7 + 5]) * p + rhor_spline[m * 7 + 6];
+          force_eam->rho[j] += ((force_eam->rhor_spline[m * 7 + 3] * p + force_eam->rhor_spline[m * 7 + 4]) * p + force_eam->rhor_spline[m * 7 + 5]) * p + force_eam->rhor_spline[m * 7 + 6];
         }
       }
     }
 
-    rho[i] += rhoi;
+    force_eam->rho[i] += rhoi;
   }
 
   // fp = derivative of embedding energy at each atom
   // phi = embedding energy at each atom
 
   for(MMD_int i = 0; i < nlocal; i++) {
-    MMD_float p = 1.0 * rho[i] * rdrho + 1.0;
-    MMD_int m = static_cast<int>(p);
-    m = MAX(1, MIN(m, nrho - 1));
+    MMD_float p = 1.0 * force_eam->rho[i] * force_eam->rdrho + 1.0;
+    MMD_int m = (int)(p);
+    m = MAX(1, MIN(m, force_eam->nrho - 1));
     p -= m;
     p = MIN(p, 1.0);
-    fp[i] = (frho_spline[m * 7 + 0] * p + frho_spline[m * 7 + 1]) * p + frho_spline[m * 7 + 2];
+    force_eam->fp[i] = (force_eam->frho_spline[m * 7 + 0] * p + force_eam->frho_spline[m * 7 + 1]) * p + force_eam->frho_spline[m * 7 + 2];
 
     // printf("fp: %lf %lf %lf %lf %lf %i %lf %lf\n",fp[i],p,frho_spline[m*7+0],frho_spline[m*7+1],frho_spline[m*7+2],m,rdrho,rho[i]);
-    if(evflag) {
-      evdwl += ((frho_spline[m * 7 + 3] * p + frho_spline[m * 7 + 4]) * p + frho_spline[m * 7 + 5]) * p + frho_spline[m * 7 + 6];
+    if(force_eam->evflag) {
+      evdwl += ((force_eam->frho_spline[m * 7 + 3] * p + force_eam->frho_spline[m * 7 + 4]) * p + force_eam->frho_spline[m * 7 + 5]) * p + force_eam->frho_spline[m * 7 + 6];
     }
   }
 
   // communicate derivative of embedding function
 
-  communicate(atom, comm);
+  ForceEAM_communicate(force_eam, atom, comm);
 
 
   // compute forces on each atom
   // loop over neighbors of my atoms
   for(MMD_int i = 0; i < nlocal; i++) {
-    int* neighs = &neighbor.neighbors[i * neighbor.maxneighs];
-    const int numneigh = neighbor.numneigh[i];
+    int* neighs = &neighbor->neighbors[i * neighbor->maxneighs];
+    const int numneigh = neighbor->numneigh[i];
     const MMD_float xtmp = x[i * PAD + 0];
     const MMD_float ytmp = x[i * PAD + 1];
     const MMD_float ztmp = x[i * PAD + 2];
@@ -203,11 +210,11 @@ void ForceEAM::compute_halfneigh(Atom &atom, Neighbor &neighbor, Comm &comm, int
       const MMD_float rsq = delx * delx + dely * dely + delz * delz;
 
       //printf("EAM: %i %i %lf %lf\n",i,j,rsq,cutforcesq);
-      if(rsq < cutforcesq) {
+      if(rsq < force_eam->cutforcesq) {
         MMD_float r = sqrt(rsq);
-        MMD_float p = r * rdr + 1.0;
-        MMD_int m = static_cast<int>(p);
-        m = m < nr - 1 ? m : nr - 1;
+        MMD_float p = r * force_eam->rdr + 1.0;
+        MMD_int m = (int)(p);
+        m = m < force_eam->nr - 1 ? m : force_eam->nr - 1;
         p -= m;
         p = p < 1.0 ? p : 1.0;
 
@@ -222,14 +229,14 @@ void ForceEAM::compute_halfneigh(Atom &atom, Neighbor &neighbor, Comm &comm, int
         //   terms of embed eng: Fi(sum rho_ij) and Fj(sum rho_ji)
         //   hence embed' = Fi(sum rho_ij) rhojp + Fj(sum rho_ji) rhoip
 
-        MMD_float rhoip = (rhor_spline[m * 7 + 0] * p + rhor_spline[m * 7 + 1]) * p + rhor_spline[m * 7 + 2];
-        MMD_float z2p = (z2r_spline[m * 7 + 0] * p + z2r_spline[m * 7 + 1]) * p + z2r_spline[m * 7 + 2];
-        MMD_float z2 = ((z2r_spline[m * 7 + 3] * p + z2r_spline[m * 7 + 4]) * p + z2r_spline[m * 7 + 5]) * p + z2r_spline[m * 7 + 6];
+        MMD_float rhoip = (force_eam->rhor_spline[m * 7 + 0] * p + force_eam->rhor_spline[m * 7 + 1]) * p + force_eam->rhor_spline[m * 7 + 2];
+        MMD_float z2p = (force_eam->z2r_spline[m * 7 + 0] * p + force_eam->z2r_spline[m * 7 + 1]) * p + force_eam->z2r_spline[m * 7 + 2];
+        MMD_float z2 = ((force_eam->z2r_spline[m * 7 + 3] * p + force_eam->z2r_spline[m * 7 + 4]) * p + force_eam->z2r_spline[m * 7 + 5]) * p + force_eam->z2r_spline[m * 7 + 6];
 
         MMD_float recip = 1.0 / r;
         MMD_float phi = z2 * recip;
         MMD_float phip = z2p * recip - phi * recip;
-        MMD_float psip = fp[i] * rhoip + fp[j] * rhoip + phip;
+        MMD_float psip = force_eam->fp[i] * rhoip + force_eam->fp[j] * rhoip + phip;
         MMD_float fpair = -psip * recip;
 
         fx += delx * fpair;
@@ -244,8 +251,8 @@ void ForceEAM::compute_halfneigh(Atom &atom, Neighbor &neighbor, Comm &comm, int
           f[j * PAD + 2] -= delz * fpair;
         } else fpair *= 0.5;
 
-        if(evflag) {
-          virial += delx * delx * fpair + dely * dely * fpair + delz * delz * fpair;
+        if(force_eam->evflag) {
+          force_eam->virial += delx * delx * fpair + dely * dely * fpair + delz * delz * fpair;
         }
 
         if(j < nlocal) evdwl += phi;
@@ -258,54 +265,54 @@ void ForceEAM::compute_halfneigh(Atom &atom, Neighbor &neighbor, Comm &comm, int
     f[i * PAD + 2] += fz;
   }
 
-  eng_vdwl = evdwl;
+  force_eam->eng_vdwl = evdwl;
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ForceEAM::compute_fullneigh(Atom &atom, Neighbor &neighbor, Comm &comm, int me)
+void ForceEAM_compute_fullneigh(ForceEAM *force_eam, Atom *atom, Neighbor *neighbor, Comm *comm, int me)
 {
 
   MMD_float evdwl = 0.0;
 
-  virial = 0;
+  force_eam->virial = 0;
   // grow energy and fp arrays if necessary
   // need to be atom->nmax in length
 
   
   {
-    if(atom.nmax > nmax) {
-      nmax = atom.nmax;
-      delete [] fp;
-      fp = new MMD_float[nmax];
+    if(atom->nmax > force_eam->nmax) {
+      force_eam->nmax = atom->nmax;
+      free(force_eam->fp);
+      force_eam->fp = (MMD_float *) malloc(sizeof(MMD_float) * force_eam->nmax);
 
-      acc_free(d_fp);
-      d_fp = (MMD_float*) acc_malloc(nmax * sizeof(MMD_float));
+      acc_free(force_eam->d_fp);
+      force_eam->d_fp = (MMD_float*) acc_malloc(force_eam->nmax * sizeof(MMD_float));
     }
   }
 
   
 
-  const int nlocal = atom.nlocal;
-  const int nall = atom.nlocal + atom.nghost;
+  const int nlocal = atom->nlocal;
+  const int nall = atom->nlocal + atom->nghost;
   //const MMD_float* const restrict x = &atom.x[0][0];
-  const MMD_float* const restrict x = atom.d_x;
+  const MMD_float* const restrict x = atom->d_x;
   //MMD_float* const restrict f = &atom.f[0][0];
-  MMD_float* const restrict f = atom.d_f;
-  const int* const restrict neighbors = neighbor.d_neighbors;
-  const int* const restrict numneighs = neighbor.d_numneigh;
-  const int maxneighs = neighbor.maxneighs;
-  const int nrho_ = nrho;
-  const int nr_ = nr;
-  const MMD_float cutforcesq_ = cutforcesq;
-  const int nmax = neighbor.nmax;
-  const MMD_float rdr_ = rdr;
-  const MMD_float rdrho_ = rdrho;
+  MMD_float* const restrict f = atom->d_f;
+  const int* const restrict neighbors = neighbor->d_neighbors;
+  const int* const restrict numneighs = neighbor->d_numneigh;
+  const int maxneighs = neighbor->maxneighs;
+  const int nrho_ = force_eam->nrho;
+  const int nr_ = force_eam->nr;
+  const MMD_float cutforcesq_ = force_eam->cutforcesq;
+  const int nmax = neighbor->nmax;
+  const MMD_float rdr_ = force_eam->rdr;
+  const MMD_float rdrho_ = force_eam->rdrho;
 
-  MMD_float* const restrict fp_ = fp;
-  const MMD_float* const restrict rhor_spline_= d_rhor_spline;
-  const MMD_float* const restrict frho_spline_= d_frho_spline;
-  const MMD_float* const restrict z2r_spline_= d_z2r_spline;
+  MMD_float* const restrict fp_ = force_eam->fp;
+  const MMD_float* const restrict rhor_spline_= force_eam->d_rhor_spline;
+  const MMD_float* const restrict frho_spline_= force_eam->d_frho_spline;
+  const MMD_float* const restrict z2r_spline_= force_eam->d_z2r_spline;
 
 // zero out density
 
@@ -334,7 +341,7 @@ printf("Kernel1\n");
 
       if(rsq < cutforcesq_) {
         MMD_float p = sqrt(rsq) * rdr_ + 1.0;
-        MMD_int m = static_cast<int>(p);
+        MMD_int m = (int)(p);
         m = m < nr_ - 1 ? m : nr_ - 1;
         p -= m;
         p = p < 1.0 ? p : 1.0;
@@ -344,7 +351,7 @@ printf("Kernel1\n");
     }
 
     MMD_float p = 1.0 * rhoi * rdrho_ + 1.0;
-    MMD_int m = static_cast<int>(p);
+    MMD_int m = (int)(p);
     m = MAX(1, MIN(m, nrho_ - 1));
     p -= m;
     p = MIN(p, 1.0);
@@ -367,7 +374,7 @@ printf("Kernel1\n");
 
   
   {
-    communicate(atom, comm);
+    ForceEAM_communicate(force_eam, atom, comm);
   }
 
   
@@ -405,7 +412,7 @@ printf("Kernel2\n");
       if(rsq < cutforcesq_) {
         MMD_float r = sqrt(rsq);
         MMD_float p = r * rdr_ + 1.0;
-        MMD_int m = static_cast<int>(p);
+        MMD_int m = (int)(p);
         m = m < nr_ - 1 ? m : nr_ - 1;
         p -= m;
         p = p < 1.0 ? p : 1.0;
@@ -455,9 +462,9 @@ printf("Kernel2\n");
   }
 }
 printf("ForceEAM done\n");  
-  virial += t_virial;
+  force_eam->virial += t_virial;
   
-  eng_vdwl += 2.0 * evdwl;
+  force_eam->eng_vdwl += 2.0 * evdwl;
 
   
 }
@@ -471,7 +478,7 @@ printf("ForceEAM done\n");
    read DYNAMO funcfl file
 ------------------------------------------------------------------------- */
 
-void ForceEAM::coeff(char* arg)
+void ForceEAM_coeff(ForceEAM *force_eam, char* arg)
 {
 
 
@@ -480,29 +487,29 @@ void ForceEAM::coeff(char* arg)
   // store filename in Funcfl data struct
 
 
-  read_file(arg);
+  ForceEAM_read_file(force_eam, arg);
   int n = strlen(arg) + 1;
-  funcfl.file = new char[n];
+  force_eam->funcfl.file = (char *) malloc(sizeof(char) * n);
 
   // set setflag and map only for i,i type pairs
   // set mass of atom type if i = j
 
   //atom->mass = funcfl.mass;
-  cutmax = funcfl.cut;
+  force_eam->cutmax = force_eam->funcfl.cut;
 
-  cutforcesq = cutmax * cutmax;
+  force_eam->cutforcesq = force_eam->cutmax * force_eam->cutmax;
 }
 
 /* ----------------------------------------------------------------------
    init specific to this pair style
 ------------------------------------------------------------------------- */
 
-void ForceEAM::init_style(Atom &atom)
+void ForceEAM_init_style(ForceEAM *force_eam, Atom *atom)
 {
   // convert read-in file(s) to arrays and spline them
 
-  file2array();
-  array2spline(atom);
+  ForceEAM_file2array(force_eam);
+  ForceEAM_array2spline(force_eam, atom);
 }
 
 /* ----------------------------------------------------------------------
@@ -515,9 +522,9 @@ void ForceEAM::init_style(Atom &atom)
    read potential values from a DYNAMO single element funcfl file
 ------------------------------------------------------------------------- */
 
-void ForceEAM::read_file(char* filename)
+void ForceEAM_read_file(ForceEAM *force_eam, char* filename)
 {
-  Funcfl* file = &funcfl;
+  struct Funcfl* file = &force_eam->funcfl;
 
   //me = 0;
   FILE* fptr;
@@ -525,7 +532,7 @@ void ForceEAM::read_file(char* filename)
 
   int flag = 0;
 
-  if(me == 0) {
+  if(force_eam->me == 0) {
     fptr = fopen(filename, "r");
 
     if(fptr == NULL) {
@@ -543,7 +550,7 @@ void ForceEAM::read_file(char* filename)
 
   int tmp;
 
-  if(me == 0) {
+  if(force_eam->me == 0) {
     fgets(line, MAXLINE, fptr);
     fgets(line, MAXLINE, fptr);
     sscanf(line, "%d %lg", &tmp, &file->mass);
@@ -559,26 +566,26 @@ void ForceEAM::read_file(char* filename)
   MPI_Bcast(&file->nr, 1, MPI_INT, 0, MPI_COMM_WORLD);
   MPI_Bcast(&file->dr, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
   MPI_Bcast(&file->cut, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-  mass = file->mass;
-  file->frho = new MMD_float[file->nrho + 1];
-  file->rhor = new MMD_float[file->nr + 1];
-  file->zr = new MMD_float[file->nr + 1];
+  force_eam->mass = file->mass;
+  file->frho = (MMD_float *) malloc(sizeof(MMD_float) * (file->nrho + 1));
+  file->rhor = (MMD_float *) malloc(sizeof(MMD_float) * (file->nr + 1));
+  file->zr =   (MMD_float *) malloc(sizeof(MMD_float) * (file->nr + 1));
 
-  if(me == 0) grab(fptr, file->nrho, file->frho);
+  if(force_eam->me == 0) ForceEAM_grab(force_eam, fptr, file->nrho, file->frho);
 
   if(sizeof(MMD_float) == 4)
     MPI_Bcast(file->frho, file->nrho, MPI_FLOAT, 0, MPI_COMM_WORLD);
   else
     MPI_Bcast(file->frho, file->nrho, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-  if(me == 0) grab(fptr, file->nr, file->zr);
+  if(force_eam->me == 0) ForceEAM_grab(force_eam, fptr, file->nr, file->zr);
 
   if(sizeof(MMD_float) == 4)
     MPI_Bcast(file->zr, file->nr, MPI_FLOAT, 0, MPI_COMM_WORLD);
   else
     MPI_Bcast(file->zr, file->nr, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-  if(me == 0) grab(fptr, file->nr, file->rhor);
+  if(force_eam->me == 0) ForceEAM_grab(force_eam, fptr, file->nr, file->rhor);
 
   if(sizeof(MMD_float) == 4)
     MPI_Bcast(file->rhor, file->nr, MPI_FLOAT, 0, MPI_COMM_WORLD);
@@ -591,7 +598,7 @@ void ForceEAM::read_file(char* filename)
 
   for(int i = file->nr; i > 0; i--) file->zr[i] = file->zr[i - 1];
 
-  if(me == 0) fclose(fptr);
+  if(force_eam->me == 0) fclose(fptr);
 }
 
 /* ----------------------------------------------------------------------
@@ -599,7 +606,7 @@ void ForceEAM::read_file(char* filename)
    interpolate all file values to a single grid and cutoff
 ------------------------------------------------------------------------- */
 
-void ForceEAM::file2array()
+void ForceEAM_file2array(ForceEAM *force_eam)
 {
   int i, j, k, m, n;
   int ntypes = 1;
@@ -610,20 +617,20 @@ void ForceEAM::file2array()
 
   int active;
   double rmax, rhomax;
-  dr = drho = rmax = rhomax = 0.0;
+  force_eam->dr = force_eam->drho = rmax = rhomax = 0.0;
 
   active = 0;
-  Funcfl* file = &funcfl;
-  dr = MAX(dr, file->dr);
-  drho = MAX(drho, file->drho);
+  struct Funcfl* file = &force_eam->funcfl;
+  force_eam->dr = MAX(force_eam->dr, file->dr);
+  force_eam->drho = MAX(force_eam->drho, file->drho);
   rmax = MAX(rmax, (file->nr - 1) * file->dr);
   rhomax = MAX(rhomax, (file->nrho - 1) * file->drho);
 
   // set nr,nrho from cutoff and spacings
   // 0.5 is for round-off in divide
 
-  nr = static_cast<int>(rmax / dr + 0.5);
-  nrho = static_cast<int>(rhomax / drho + 0.5);
+  force_eam->nr = (int)(rmax / force_eam->dr + 0.5);
+  force_eam->nrho = (int)(rhomax / force_eam->drho + 0.5);
 
   // ------------------------------------------------------------------
   // setup frho arrays
@@ -632,7 +639,7 @@ void ForceEAM::file2array()
   // allocate frho arrays
   // nfrho = # of funcfl files + 1 for zero array
 
-  frho = new MMD_float[nrho + 1];
+  force_eam->frho = (MMD_float *) malloc(sizeof(MMD_float) * (force_eam->nrho + 1));
 
   // interpolate each file's frho to a single grid and cutoff
 
@@ -640,10 +647,10 @@ void ForceEAM::file2array()
 
   n = 0;
 
-  for(m = 1; m <= nrho; m++) {
-    r = (m - 1) * drho;
+  for(m = 1; m <= force_eam->nrho; m++) {
+    r = (m - 1) * force_eam->drho;
     p = r / file->drho + 1.0;
-    k = static_cast<int>(p);
+    k = (int)(p);
     k = MIN(k, file->nrho - 2);
     k = MAX(k, 2);
     p -= k;
@@ -652,7 +659,7 @@ void ForceEAM::file2array()
     cof2 = 0.5 * (p * p - 1.0) * (p - 2.0);
     cof3 = -0.5 * p * (p + 1.0) * (p - 2.0);
     cof4 = sixth * p * (p * p - 1.0);
-    frho[m] = cof1 * file->frho[k - 1] + cof2 * file->frho[k] +
+    force_eam->frho[m] = cof1 * file->frho[k - 1] + cof2 * file->frho[k] +
               cof3 * file->frho[k + 1] + cof4 * file->frho[k + 2];
   }
 
@@ -664,14 +671,14 @@ void ForceEAM::file2array()
   // allocate rhor arrays
   // nrhor = # of funcfl files
 
-  rhor = new MMD_float[nr + 1];
+  force_eam->rhor = (MMD_float *) malloc(sizeof(MMD_float) * (force_eam->nr + 1));
 
   // interpolate each file's rhor to a single grid and cutoff
 
-  for(m = 1; m <= nr; m++) {
-    r = (m - 1) * dr;
+  for(m = 1; m <= force_eam->nr; m++) {
+    r = (m - 1) * force_eam->dr;
     p = r / file->dr + 1.0;
-    k = static_cast<int>(p);
+    k = (int)(p);
     k = MIN(k, file->nr - 2);
     k = MAX(k, 2);
     p -= k;
@@ -680,7 +687,7 @@ void ForceEAM::file2array()
     cof2 = 0.5 * (p * p - 1.0) * (p - 2.0);
     cof3 = -0.5 * p * (p + 1.0) * (p - 2.0);
     cof4 = sixth * p * (p * p - 1.0);
-    rhor[m] = cof1 * file->rhor[k - 1] + cof2 * file->rhor[k] +
+    force_eam->rhor[m] = cof1 * file->rhor[k - 1] + cof2 * file->rhor[k] +
               cof3 * file->rhor[k + 1] + cof4 * file->rhor[k + 2];
     //if(m==119)printf("BuildRho: %e %e %e %e %e %e\n",rhor[m],cof1,cof2,cof3,cof4,file->rhor[k]);
   }
@@ -696,21 +703,21 @@ void ForceEAM::file2array()
   // allocate z2r arrays
   // nz2r = N*(N+1)/2 where N = # of funcfl files
 
-  z2r = new MMD_float[nr + 1];
+  force_eam->z2r = (MMD_float *) malloc(sizeof(MMD_float) * (force_eam->nr + 1));
 
   // create a z2r array for each file against other files, only for I >= J
   // interpolate zri and zrj to a single grid and cutoff
 
   double zri, zrj;
 
-  Funcfl* ifile = &funcfl;
-  Funcfl* jfile = &funcfl;
+  struct Funcfl* ifile = &force_eam->funcfl;
+  struct Funcfl* jfile = &force_eam->funcfl;
 
-  for(m = 1; m <= nr; m++) {
-    r = (m - 1) * dr;
+  for(m = 1; m <= force_eam->nr; m++) {
+    r = (m - 1) * force_eam->dr;
 
     p = r / ifile->dr + 1.0;
-    k = static_cast<int>(p);
+    k = (int)(p);
     k = MIN(k, ifile->nr - 2);
     k = MAX(k, 2);
     p -= k;
@@ -723,7 +730,7 @@ void ForceEAM::file2array()
           cof3 * ifile->zr[k + 1] + cof4 * ifile->zr[k + 2];
 
     p = r / jfile->dr + 1.0;
-    k = static_cast<int>(p);
+    k = (int)(p);
     k = MIN(k, jfile->nr - 2);
     k = MAX(k, 2);
     p -= k;
@@ -735,44 +742,44 @@ void ForceEAM::file2array()
     zrj = cof1 * jfile->zr[k - 1] + cof2 * jfile->zr[k] +
           cof3 * jfile->zr[k + 1] + cof4 * jfile->zr[k + 2];
 
-    z2r[m] = 27.2 * 0.529 * zri * zrj;
+    force_eam->z2r[m] = 27.2 * 0.529 * zri * zrj;
   }
 
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ForceEAM::array2spline(Atom &atom)
+void ForceEAM_array2spline(ForceEAM *force_eam, Atom *atom)
 {
-  rdr = 1.0 / dr;
-  rdrho = 1.0 / drho;
+  force_eam->rdr = 1.0 / force_eam->dr;
+  force_eam->rdrho = 1.0 / force_eam->drho;
 
-  frho_spline = new MMD_float[(nrho + 1) * 7];
-  rhor_spline = new MMD_float[(nr + 1) * 7];
-  z2r_spline = new MMD_float[(nr + 1) * 7];
+  force_eam->frho_spline = (MMD_float *) malloc(sizeof(MMD_float) * ((force_eam->nrho + 1) * 7));
+  force_eam->rhor_spline = (MMD_float *) malloc(sizeof(MMD_float) * ((force_eam->nr + 1) * 7));
+  force_eam->z2r_spline = (MMD_float *) malloc(sizeof(MMD_float) * ((force_eam->nr + 1) * 7));
 
-  d_frho_spline = (MMD_float*) acc_malloc((nrho + 1) * 7 * sizeof(MMD_float));
-  d_rhor_spline = (MMD_float*) acc_malloc((nr + 1) * 7 * sizeof(MMD_float));
-  d_z2r_spline  = (MMD_float*) acc_malloc((nr + 1) * 7 * sizeof(MMD_float));
+  force_eam->d_frho_spline = (MMD_float*) acc_malloc((force_eam->nrho + 1) * 7 * sizeof(MMD_float));
+  force_eam->d_rhor_spline = (MMD_float*) acc_malloc((force_eam->nr + 1) * 7 * sizeof(MMD_float));
+  force_eam->d_z2r_spline  = (MMD_float*) acc_malloc((force_eam->nr + 1) * 7 * sizeof(MMD_float));
 
-  interpolate(nrho, drho, frho, frho_spline);
+  ForceEAM_interpolate(force_eam, force_eam->nrho, force_eam->drho, force_eam->frho, force_eam->frho_spline);
 
-  interpolate(nr, dr, rhor, rhor_spline);
+  ForceEAM_interpolate(force_eam, force_eam->nr, force_eam->dr, force_eam->rhor, force_eam->rhor_spline);
 
   // printf("Rhor: %lf\n",rhor(119));
 
-  interpolate(nr, dr, z2r, z2r_spline);
+  ForceEAM_interpolate(force_eam, force_eam->nr, force_eam->dr, force_eam->z2r, force_eam->z2r_spline);
 
   //printf("RhorSpline: %e %e %e %e\n",rhor_spline(119,3),rhor_spline(119,4),rhor_spline(119,5),rhor_spline(119,6));
   //printf("FrhoSpline: %e %e %e %e\n",frho_spline(119,3),frho_spline(119,4),frho_spline(119,5),frho_spline(119,6));
-  atom.sync_device(d_frho_spline,frho_spline,(nrho + 1) * 7 *sizeof(MMD_float));
-  atom.sync_device(d_rhor_spline,rhor_spline,(nr + 1) * 7 *sizeof(MMD_float));
-  atom.sync_device(d_z2r_spline,z2r_spline,(nr + 1) * 7 *sizeof(MMD_float));
+  Atom_sync_device(atom, force_eam->d_frho_spline,force_eam->frho_spline,(force_eam->nrho + 1) * 7 *sizeof(MMD_float));
+  Atom_sync_device(atom, force_eam->d_rhor_spline,force_eam->rhor_spline,(force_eam->nr + 1) * 7 *sizeof(MMD_float));
+  Atom_sync_device(atom, force_eam->d_z2r_spline,force_eam->z2r_spline,(force_eam->nr + 1) * 7 *sizeof(MMD_float));
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ForceEAM::interpolate(MMD_int n, MMD_float delta, MMD_float* f, MMD_float* spline)
+void ForceEAM_interpolate(ForceEAM *force_eam, MMD_int n, MMD_float delta, MMD_float* f, MMD_float* spline)
 {
   for(int m = 1; m <= n; m++) spline[m * 7 + 6] = f[m];
 
@@ -808,7 +815,7 @@ void ForceEAM::interpolate(MMD_int n, MMD_float delta, MMD_float* f, MMD_float* 
    only called by proc 0
 ------------------------------------------------------------------------- */
 
-void ForceEAM::grab(FILE* fptr, MMD_int n, MMD_float* list)
+void ForceEAM_grab(ForceEAM *force_eam, FILE* fptr, MMD_int n, MMD_float* list)
 {
   char* ptr;
   char line[MAXLINE];
@@ -826,39 +833,39 @@ void ForceEAM::grab(FILE* fptr, MMD_int n, MMD_float* list)
 
 /* ---------------------------------------------------------------------- */
 
-MMD_float ForceEAM::single(int i, int j, int itype, int jtype,
+MMD_float ForceEAM_single(ForceEAM *force_eam, int i, int j, int itype, int jtype,
                            MMD_float rsq, MMD_float factor_coul, MMD_float factor_lj,
-                           MMD_float &fforce)
+                           MMD_float *fforce)
 {
   int m;
   MMD_float r, p, rhoip, rhojp, z2, z2p, recip, phi, phip, psip;
   MMD_float* coeff;
 
   r = sqrt(rsq);
-  p = r * rdr + 1.0;
-  m = static_cast<int>(p);
-  m = MIN(m, nr - 1);
+  p = r * force_eam->rdr + 1.0;
+  m = (int)(p);
+  m = MIN(m, force_eam->nr - 1);
   p -= m;
   p = MIN(p, 1.0);
 
-  coeff = &rhor_spline[m * 7 + 0];
+  coeff = &force_eam->rhor_spline[m * 7 + 0];
   rhoip = (coeff[0] * p + coeff[1]) * p + coeff[2];
-  coeff = &rhor_spline[m * 7 + 0];
+  coeff = &force_eam->rhor_spline[m * 7 + 0];
   rhojp = (coeff[0] * p + coeff[1]) * p + coeff[2];
-  coeff = &z2r_spline[m * 7 + 0];
+  coeff = &force_eam->z2r_spline[m * 7 + 0];
   z2p = (coeff[0] * p + coeff[1]) * p + coeff[2];
   z2 = ((coeff[3] * p + coeff[4]) * p + coeff[5]) * p + coeff[6];
 
   recip = 1.0 / r;
   phi = z2 * recip;
   phip = z2p * recip - phi * recip;
-  psip = fp[i] * rhojp + fp[j] * rhoip + phip;
-  fforce = -psip * recip;
+  psip = force_eam->fp[i] * rhojp + force_eam->fp[j] * rhoip + phip;
+  *fforce = -psip * recip;
 
   return phi;
 }
 
-void ForceEAM::communicate(Atom &atom, Comm &comm)
+void ForceEAM_communicate(ForceEAM *force_eam, Atom *atom, Comm *comm)
 {
 
   int iswap;
@@ -867,48 +874,48 @@ void ForceEAM::communicate(Atom &atom, Comm &comm)
   MPI_Request request;
   MPI_Status status;
 
-  for(iswap = 0; iswap < comm.nswap; iswap++) {
+  for(iswap = 0; iswap < comm->nswap; iswap++) {
 
     /* pack buffer */
 
-    pbc_flags[0] = comm.pbc_any[iswap];
-    pbc_flags[1] = comm.pbc_flagx[iswap];
-    pbc_flags[2] = comm.pbc_flagy[iswap];
-    pbc_flags[3] = comm.pbc_flagz[iswap];
+    pbc_flags[0] = comm->pbc_any[iswap];
+    pbc_flags[1] = comm->pbc_flagx[iswap];
+    pbc_flags[2] = comm->pbc_flagy[iswap];
+    pbc_flags[3] = comm->pbc_flagz[iswap];
     //timer->stamp_extra_start();
 
-    int size = pack_comm(comm.sendnum[iswap], iswap, comm.buf_send, comm.sendlist);
+    int size = ForceEAM_pack_comm(force_eam, comm->sendnum[iswap], iswap, comm->buf_send, comm->sendlist);
     //timer->stamp_extra_stop(TIME_TEST);
 
 
     /* exchange with another proc
        if self, set recv buffer to send buffer */
 
-    if(comm.sendproc[iswap] != me) {
+    if(comm->sendproc[iswap] != force_eam->me) {
       if(sizeof(MMD_float) == 4) {
-        MPI_Irecv(comm.buf_recv, comm.comm_recv_size[iswap], MPI_FLOAT,
-                  comm.recvproc[iswap], 0, MPI_COMM_WORLD, &request);
-        MPI_Send(comm.buf_send, comm.comm_send_size[iswap], MPI_FLOAT,
-                 comm.sendproc[iswap], 0, MPI_COMM_WORLD);
+        MPI_Irecv(comm->buf_recv, comm->comm_recv_size[iswap], MPI_FLOAT,
+                  comm->recvproc[iswap], 0, MPI_COMM_WORLD, &request);
+        MPI_Send(comm->buf_send, comm->comm_send_size[iswap], MPI_FLOAT,
+                 comm->sendproc[iswap], 0, MPI_COMM_WORLD);
       } else {
-        MPI_Irecv(comm.buf_recv, comm.comm_recv_size[iswap], MPI_DOUBLE,
-                  comm.recvproc[iswap], 0, MPI_COMM_WORLD, &request);
-        MPI_Send(comm.buf_send, comm.comm_send_size[iswap], MPI_DOUBLE,
-                 comm.sendproc[iswap], 0, MPI_COMM_WORLD);
+        MPI_Irecv(comm->buf_recv, comm->comm_recv_size[iswap], MPI_DOUBLE,
+                  comm->recvproc[iswap], 0, MPI_COMM_WORLD, &request);
+        MPI_Send(comm->buf_send, comm->comm_send_size[iswap], MPI_DOUBLE,
+                 comm->sendproc[iswap], 0, MPI_COMM_WORLD);
       }
 
       MPI_Wait(&request, &status);
-      buf = comm.buf_recv;
-    } else buf = comm.buf_send;
+      buf = comm->buf_recv;
+    } else buf = comm->buf_send;
 
     /* unpack buffer */
 
-    unpack_comm(comm.recvnum[iswap], comm.firstrecv[iswap], buf);
+    ForceEAM_unpack_comm(force_eam, comm->recvnum[iswap], comm->firstrecv[iswap], buf);
   }
 }
 /* ---------------------------------------------------------------------- */
 
-int ForceEAM::pack_comm(int n, int iswap, MMD_float* buf, int** asendlist)
+int ForceEAM_pack_comm(ForceEAM *force_eam, int n, int iswap, MMD_float* buf, int** asendlist)
 {
   int i, j, m;
 
@@ -916,7 +923,7 @@ int ForceEAM::pack_comm(int n, int iswap, MMD_float* buf, int** asendlist)
 
   for(i = 0; i < n; i++) {
     j = asendlist[iswap][i];
-    buf[i] = fp[j];
+    buf[i] = force_eam->fp[j];
   }
 
   return 1;
@@ -924,33 +931,33 @@ int ForceEAM::pack_comm(int n, int iswap, MMD_float* buf, int** asendlist)
 
 /* ---------------------------------------------------------------------- */
 
-void ForceEAM::unpack_comm(int n, int first, MMD_float* buf)
+void ForceEAM_unpack_comm(ForceEAM *force_eam, int n, int first, MMD_float* buf)
 {
   int i, m, last;
 
   m = 0;
   last = first + n;
 
-  for(i = first; i < last; i++) fp[i] = buf[m++];
+  for(i = first; i < last; i++) force_eam->fp[i] = buf[m++];
 }
 
 /* ---------------------------------------------------------------------- */
 
-int ForceEAM::pack_reverse_comm(int n, int first, MMD_float* buf)
+int ForceEAM_pack_reverse_comm(ForceEAM *force_eam, int n, int first, MMD_float* buf)
 {
   int i, m, last;
 
   m = 0;
   last = first + n;
 
-  for(i = first; i < last; i++) buf[m++] = rho[i];
+  for(i = first; i < last; i++) buf[m++] = force_eam->rho[i];
 
   return 1;
 }
 
 /* ---------------------------------------------------------------------- */
 
-void ForceEAM::unpack_reverse_comm(int n, int* list, MMD_float* buf)
+void ForceEAM_unpack_reverse_comm(ForceEAM *force_eam, int n, int* list, MMD_float* buf)
 {
   int i, j, m;
 
@@ -958,7 +965,7 @@ void ForceEAM::unpack_reverse_comm(int n, int* list, MMD_float* buf)
 
   for(i = 0; i < n; i++) {
     j = list[i];
-    rho[j] += buf[m++];
+    force_eam->rho[j] += buf[m++];
   }
 }
 
@@ -966,32 +973,32 @@ void ForceEAM::unpack_reverse_comm(int n, int* list, MMD_float* buf)
    memory usage of local atom-based arrays
 ------------------------------------------------------------------------- */
 
-MMD_float ForceEAM::memory_usage()
+MMD_float ForceEAM_memory_usage(ForceEAM *force_eam)
 {
-  MMD_int bytes = 2 * nmax * sizeof(MMD_float);
+  MMD_int bytes = 2 * force_eam->nmax * sizeof(MMD_float);
   return bytes;
 }
 
 
-void ForceEAM::bounds(char* str, int nmax, int &nlo, int &nhi)
+void ForceEAM_bounds(ForceEAM *force_eam, char* str, int nmax, int *nlo, int *nhi)
 {
   char* ptr = strchr(str, '*');
 
   if(ptr == NULL) {
-    nlo = nhi = atoi(str);
+    *nlo = *nhi = atoi(str);
   } else if(strlen(str) == 1) {
-    nlo = 1;
-    nhi = nmax;
+    *nlo = 1;
+    *nhi = nmax;
   } else if(ptr == str) {
-    nlo = 1;
-    nhi = atoi(ptr + 1);
+    *nlo = 1;
+    *nhi = atoi(ptr + 1);
   } else if(strlen(ptr + 1) == 0) {
-    nlo = atoi(str);
-    nhi = nmax;
+    *nlo = atoi(str);
+    *nhi = nmax;
   } else {
-    nlo = atoi(str);
-    nhi = atoi(ptr + 1);
+    *nlo = atoi(str);
+    *nhi = atoi(ptr + 1);
   }
 
-  if(nlo < 1 || nhi > nmax) printf("Numeric index is out of bounds");
+  if(*nlo < 1 || *nhi > nmax) printf("Numeric index is out of bounds");
 }

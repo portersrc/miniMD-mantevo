@@ -29,8 +29,8 @@
    Please read the accompanying README and LICENSE files.
 ---------------------------------------------------------------------- */
 
-#include <cstdio>
-#include <cmath>
+#include <stdio.h>
+#include <math.h>
 #include "mpi.h"
 #include "atom.h"
 #include "thermo.h"
@@ -38,13 +38,12 @@
 #include "integrate.h"
 #include "neighbor.h"
 
-#include <cstring>
-#include <cstdio>
+#include <string.h>
 
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 
-double random(int*);
+double local_random(int*);
 
 #define NSECTIONS 3
 #define MAXLINE 255
@@ -92,7 +91,7 @@ void read_lammps_parse_keyword(int first)
   strcpy(keyword, &line[start]);
 }
 
-void read_lammps_header(Atom &atom)
+void read_lammps_header(Atom *atom)
 {
   int n;
   char* ptr;
@@ -130,7 +129,7 @@ void read_lammps_header(Atom &atom)
 
     // search line for header keyword and set corresponding variable
 
-    if(strstr(line, "atoms")) sscanf(line, "%i", &atom.natoms);
+    if(strstr(line, "atoms")) sscanf(line, "%i", &atom->natoms);
     else if(strstr(line, "atom types")) sscanf(line, "%i", &ntypes);
 
     // check for these first
@@ -138,13 +137,13 @@ void read_lammps_header(Atom &atom)
 
     else if(strstr(line, "xlo xhi")) {
       sscanf(line, "%lg %lg", &xlo, &xhi);
-      atom.box.xprd = xhi - xlo;
+      atom->box.xprd = xhi - xlo;
     } else if(strstr(line, "ylo yhi")) {
       sscanf(line, "%lg %lg", &ylo, &yhi);
-      atom.box.yprd = yhi - ylo;
+      atom->box.yprd = yhi - ylo;
     } else if(strstr(line, "zlo zhi")) {
       sscanf(line, "%lg %lg", &zlo, &zhi);
-      atom.box.zprd = zhi - zlo;
+      atom->box.zprd = zhi - zlo;
     } else break;
   }
 
@@ -166,13 +165,13 @@ void read_lammps_header(Atom &atom)
   // error check on consistency of header values
 }
 
-void read_lammps_atoms(Atom &atom, MMD_float** x)
+void read_lammps_atoms(Atom *atom, MMD_float** x)
 {
   int i;
 
   int nread = 0;
-  int natoms = atom.natoms;
-  atom.nlocal = 0;
+  int natoms = atom->natoms;
+  atom->nlocal = 0;
 
   int type;
   double xx, xy, xz;
@@ -189,12 +188,12 @@ void read_lammps_atoms(Atom &atom, MMD_float** x)
 
 }
 
-void read_lammps_velocities(Atom &atom, MMD_float** v)
+void read_lammps_velocities(Atom *atom, MMD_float** v)
 {
   int i;
 
   int nread = 0;
-  int natoms = atom.natoms;
+  int natoms = atom->natoms;
 
   double x, y, z;
 
@@ -212,7 +211,7 @@ void read_lammps_velocities(Atom &atom, MMD_float** v)
 
 }
 
-int read_lammps_data(Atom &atom, Comm &comm, Neighbor &neighbor, Integrate &integrate, Thermo &thermo, char* file, int units)
+int read_lammps_data(Atom *atom, Comm *comm, Neighbor *neighbor, Integrate *integrate, Thermo *thermo, char* file, int units)
 {
   fp = fopen(file, "r");
 
@@ -223,33 +222,33 @@ int read_lammps_data(Atom &atom, Comm &comm, Neighbor &neighbor, Integrate &inte
 
   read_lammps_header(atom);
 
-  comm.setup(neighbor.cutneigh, atom);
+  Comm_setup(comm, neighbor->cutneigh, atom);
 
-  if(neighbor.nbinx < 0) {
-    MMD_float volume = atom.box.xprd * atom.box.yprd * atom.box.zprd;
-    MMD_float rho = 1.0 * atom.natoms / volume;
-    MMD_float neigh_bin_size = pow(rho * 16, MMD_float(1.0 / 3.0));
-    neighbor.nbinx = atom.box.xprd / neigh_bin_size;
-    neighbor.nbiny = atom.box.yprd / neigh_bin_size;
-    neighbor.nbinz = atom.box.zprd / neigh_bin_size;
+  if(neighbor->nbinx < 0) {
+    MMD_float volume = atom->box.xprd * atom->box.yprd * atom->box.zprd;
+    MMD_float rho = 1.0 * atom->natoms / volume;
+    MMD_float neigh_bin_size = pow(rho * 16, (MMD_float)(1.0 / 3.0));
+    neighbor->nbinx = atom->box.xprd / neigh_bin_size;
+    neighbor->nbiny = atom->box.yprd / neigh_bin_size;
+    neighbor->nbinz = atom->box.zprd / neigh_bin_size;
   }
 
-  if(neighbor.nbinx == 0) neighbor.nbinx = 1;
+  if(neighbor->nbinx == 0) neighbor->nbinx = 1;
 
-  if(neighbor.nbiny == 0) neighbor.nbiny = 1;
+  if(neighbor->nbiny == 0) neighbor->nbiny = 1;
 
-  if(neighbor.nbinz == 0) neighbor.nbinz = 1;
+  if(neighbor->nbinz == 0) neighbor->nbinz = 1;
 
-  neighbor.setup(atom);
+  Neighbor_setup(neighbor, atom);
 
-  integrate.setup();
+  Integrate_setup(integrate);
 
   //force->setup();
 
-  thermo.setup(atom.box.xprd * atom.box.yprd * atom.box.zprd / atom.natoms, integrate, atom, units);
+  Thermo_setup(thermo, atom->box.xprd * atom->box.yprd * atom->box.zprd / atom->natoms, integrate, atom, units);
 
-  MMD_float** x = atom.create_2d_MMD_float_array(atom.natoms, PAD);
-  MMD_float** v = atom.create_2d_MMD_float_array(atom.natoms, PAD);
+  MMD_float** x = Atom_create_2d_MMD_float_array(atom, atom->natoms, PAD);
+  MMD_float** v = Atom_create_2d_MMD_float_array(atom, atom->natoms, PAD);
 
   int atomflag = 0;
   int tmp;
@@ -266,19 +265,19 @@ int read_lammps_data(Atom &atom, Comm &comm, Neighbor &neighbor, Integrate &inte
       fgets(line, MAXLINE, fp);
 
       if(sizeof(MMD_float) == 4)
-        sscanf(line, "%i %g", &tmp, &atom.mass);
+        sscanf(line, "%i %g", &tmp, &atom->mass);
       else
-        sscanf(line, "%i %lg", &tmp, &atom.mass);
+        sscanf(line, "%i %lg", &tmp, &atom->mass);
     }
 
     read_lammps_parse_keyword(0);
   }
 
-  for(int i = 0; i < atom.natoms; i++) {
-    if(x[i][0] >= atom.box.xlo && x[i][0] < atom.box.xhi &&
-        x[i][1] >= atom.box.ylo && x[i][1] < atom.box.yhi &&
-        x[i][2] >= atom.box.zlo && x[i][2] < atom.box.zhi)
-      atom.addatom(x[i][0], x[i][1], x[i][2], v[i][0], v[i][1], v[i][2]);
+  for(int i = 0; i < atom->natoms; i++) {
+    if(x[i][0] >= atom->box.xlo && x[i][0] < atom->box.xhi &&
+        x[i][1] >= atom->box.ylo && x[i][1] < atom->box.yhi &&
+        x[i][2] >= atom->box.zlo && x[i][2] < atom->box.zhi)
+      Atom_addatom(atom, x[i][0], x[i][1], x[i][2], v[i][0], v[i][1], v[i][2]);
   }
 
   int me;
@@ -287,9 +286,9 @@ int read_lammps_data(Atom &atom, Comm &comm, Neighbor &neighbor, Integrate &inte
   /* check that correct # of atoms were created */
 
   int natoms;
-  MPI_Allreduce(&atom.nlocal, &natoms, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(&atom->nlocal, &natoms, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 
-  if(natoms != atom.natoms) {
+  if(natoms != atom->natoms) {
     if(me == 0) printf("Created incorrect # of atoms\n");
 
     return 1;
@@ -301,33 +300,33 @@ int read_lammps_data(Atom &atom, Comm &comm, Neighbor &neighbor, Integrate &inte
 
 /* create simulation box */
 
-void create_box(Atom &atom, int nx, int ny, int nz, double rho)
+void create_box(Atom *atom, int nx, int ny, int nz, double rho)
 {
   double lattice = pow((4.0 / rho), (1.0 / 3.0));
-  atom.box.xprd = nx * lattice;
-  atom.box.yprd = ny * lattice;
-  atom.box.zprd = nz * lattice;
+  atom->box.xprd = nx * lattice;
+  atom->box.yprd = ny * lattice;
+  atom->box.zprd = nz * lattice;
 }
 
 /* initialize atoms on fcc lattice in parallel fashion */
 
-int create_atoms(Atom &atom, int nx, int ny, int nz, double rho)
+int create_atoms(Atom *atom, int nx, int ny, int nz, double rho)
 {
   /* total # of atoms */
 
-  atom.natoms = 4 * nx * ny * nz;
-  atom.nlocal = 0;
+  atom->natoms = 4 * nx * ny * nz;
+  atom->nlocal = 0;
 
   /* determine loop bounds of lattice subsection that overlaps my sub-box
      insure loop bounds do not exceed nx,ny,nz */
 
   double alat = pow((4.0 / rho), (1.0 / 3.0));
-  int ilo = static_cast<int>(atom.box.xlo / (0.5 * alat) - 1);
-  int ihi = static_cast<int>(atom.box.xhi / (0.5 * alat) + 1);
-  int jlo = static_cast<int>(atom.box.ylo / (0.5 * alat) - 1);
-  int jhi = static_cast<int>(atom.box.yhi / (0.5 * alat) + 1);
-  int klo = static_cast<int>(atom.box.zlo / (0.5 * alat) - 1);
-  int khi = static_cast<int>(atom.box.zhi / (0.5 * alat) + 1);
+  int ilo = (int)(atom->box.xlo / (0.5 * alat) - 1);
+  int ihi = (int)(atom->box.xhi / (0.5 * alat) + 1);
+  int jlo = (int)(atom->box.ylo / (0.5 * alat) - 1);
+  int jhi = (int)(atom->box.yhi / (0.5 * alat) + 1);
+  int klo = (int)(atom->box.zlo / (0.5 * alat) - 1);
+  int khi = (int)(atom->box.zhi / (0.5 * alat) + 1);
 
   ilo = MAX(ilo, 0);
   ihi = MIN(ihi, 2 * nx - 1);
@@ -371,24 +370,24 @@ int create_atoms(Atom &atom, int nx, int ny, int nz, double rho)
       ytmp = 0.5 * alat * j;
       ztmp = 0.5 * alat * k;
 
-      if(xtmp >= atom.box.xlo && xtmp < atom.box.xhi &&
-          ytmp >= atom.box.ylo && ytmp < atom.box.yhi &&
-          ztmp >= atom.box.zlo && ztmp < atom.box.zhi) {
+      if(xtmp >= atom->box.xlo && xtmp < atom->box.xhi &&
+          ytmp >= atom->box.ylo && ytmp < atom->box.yhi &&
+          ztmp >= atom->box.zlo && ztmp < atom->box.zhi) {
         n = k * (2 * ny) * (2 * nx) + j * (2 * nx) + i + 1;
 
-        for(m = 0; m < 5; m++) random(&n);
+        for(m = 0; m < 5; m++) local_random(&n);
 
-        vx = random(&n);
+        vx = local_random(&n);
 
-        for(m = 0; m < 5; m++) random(&n);
+        for(m = 0; m < 5; m++) local_random(&n);
 
-        vy = random(&n);
+        vy = local_random(&n);
 
-        for(m = 0; m < 5; m++) random(&n);
+        for(m = 0; m < 5; m++) local_random(&n);
 
-        vz = random(&n);
+        vz = local_random(&n);
 
-        atom.addatom(xtmp, ytmp, ztmp, vx, vy, vz);
+        Atom_addatom(atom, xtmp, ytmp, ztmp, vx, vy, vz);
       }
     }
 
@@ -437,9 +436,9 @@ int create_atoms(Atom &atom, int nx, int ny, int nz, double rho)
   /* check that correct # of atoms were created */
 
   int natoms;
-  MPI_Allreduce(&atom.nlocal, &natoms, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(&atom->nlocal, &natoms, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 
-  if(natoms != atom.natoms) {
+  if(natoms != atom->natoms) {
     if(me == 0) printf("Created incorrect # of atoms\n");
 
     return 1;
@@ -450,7 +449,7 @@ int create_atoms(Atom &atom, int nx, int ny, int nz, double rho)
 
 /* adjust initial velocities to give desired temperature */
 
-void create_velocity(double t_request, Atom &atom, Thermo &thermo)
+void create_velocity(double t_request, Atom *atom, Thermo *thermo)
 {
   int i;
 
@@ -460,35 +459,35 @@ void create_velocity(double t_request, Atom &atom, Thermo &thermo)
   double vytot = 0.0;
   double vztot = 0.0;
 
-  for(i = 0; i < atom.nlocal; i++) {
-    vxtot += atom.v[i][0];
-    vytot += atom.v[i][1];
-    vztot += atom.v[i][2];
+  for(i = 0; i < atom->nlocal; i++) {
+    vxtot += atom->v[i][0];
+    vytot += atom->v[i][1];
+    vztot += atom->v[i][2];
   }
 
   double tmp;
   MPI_Allreduce(&vxtot, &tmp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-  vxtot = tmp / atom.natoms;
+  vxtot = tmp / atom->natoms;
   MPI_Allreduce(&vytot, &tmp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-  vytot = tmp / atom.natoms;
+  vytot = tmp / atom->natoms;
   MPI_Allreduce(&vztot, &tmp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-  vztot = tmp / atom.natoms;
+  vztot = tmp / atom->natoms;
 
-  for(i = 0; i < atom.nlocal; i++) {
-    atom.v[i][0] -= vxtot;
-    atom.v[i][1] -= vytot;
-    atom.v[i][2] -= vztot;
+  for(i = 0; i < atom->nlocal; i++) {
+    atom->v[i][0] -= vxtot;
+    atom->v[i][1] -= vytot;
+    atom->v[i][2] -= vztot;
   }
 
   /* rescale velocities, including old ones */
-  thermo.t_act = 0;
-  double t = thermo.temperature(atom);
+  thermo->t_act = 0;
+  double t = Thermo_temperature(thermo, atom);
   double factor = sqrt(t_request / t);
 
-  for(i = 0; i < atom.nlocal; i++) {
-    atom.v[i][0] *= factor;
-    atom.v[i][1] *= factor;
-    atom.v[i][2] *= factor;
+  for(i = 0; i < atom->nlocal; i++) {
+    atom->v[i][0] *= factor;
+    atom->v[i][1] *= factor;
+    atom->v[i][2] *= factor;
   }
 }
 
@@ -501,7 +500,7 @@ void create_velocity(double t_request, Atom &atom, Thermo &thermo)
 #define IR 2836
 #define MASK 123459876
 
-double random(int* idum)
+double local_random(int* idum)
 {
   int k;
   double ans;

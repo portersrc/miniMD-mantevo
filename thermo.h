@@ -41,11 +41,10 @@ enum units {LJ, METAL};
 #include "threadData.h"
 #include "types.h"
 
-class Integrate;
+struct Integrate_s;
 
-class Thermo
+typedef struct
 {
-  public:
     MMD_int nstat;
     MMD_int mstat;
     MMD_int ntimes;
@@ -54,20 +53,20 @@ class Thermo
     MMD_float* engarr;
     MMD_float* prsarr;
 
-    Thermo();
-    ~Thermo();
-    void setup(MMD_float, Integrate &integrate, Atom &atom, MMD_int);
-    MMD_float temperature(Atom &);
-    MMD_float energy(Atom &, Neighbor &, Force*);
-    MMD_float pressure(MMD_float, Force*);
-    void compute(MMD_int, Atom &, Neighbor &, Force*, Timer &, Comm &);
 
     MMD_float t_act, p_act, e_act;
     MMD_float t_scale, e_scale, p_scale, mvv2e, dof_boltz;
 
     ThreadData* threads;
-  private:
     MMD_float rho;
-};
+}Thermo;
+
+void Thermo_init(Thermo *);
+void Thermo_destroy(Thermo *);
+void Thermo_setup(Thermo *, MMD_float, struct Integrate_s *integrate, Atom *atom, MMD_int);
+MMD_float Thermo_temperature(Thermo *, Atom *);
+MMD_float Thermo_energy(Thermo *, Atom *, Neighbor *, Force*);
+MMD_float Thermo_pressure(Thermo *, MMD_float, Force*);
+void Thermo_compute(Thermo *, MMD_int, Atom *, Neighbor *, Force*, Timer *, Comm *);
 
 #endif

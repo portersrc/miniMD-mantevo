@@ -45,8 +45,8 @@
 
 void stats(int, double*, double*, double*, double*, int, int*);
 
-void output(In &in, Atom &atom, Force* force, Neighbor &neighbor, Comm &comm,
-            Thermo &thermo, Integrate &integrate, Timer &timer, int screen_yaml)
+void output(In *in, Atom *atom, Force* force, Neighbor *neighbor, Comm *comm,
+            Thermo *thermo, Integrate *integrate, Timer *timer, int screen_yaml)
 {
   int i, n;
   int me, nprocs;
@@ -59,25 +59,25 @@ void output(In &in, Atom &atom, Force* force, Neighbor &neighbor, Comm &comm,
 
   /* enforce PBC, then check for lost atoms */
 
-  atom.pbc();
+  Atom_pbc(atom);
 
   int natoms;
-  MPI_Allreduce(&atom.nlocal, &natoms, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(&atom->nlocal, &natoms, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 
   int nlost = 0;
 
-  for(i = 0; i < atom.nlocal; i++) {
-    if(atom.x[i][0] < 0.0 || atom.x[i][0] >= atom.box.xprd ||
-        atom.x[i][1] < 0.0 || atom.x[i][1] >= atom.box.yprd ||
-        atom.x[i][2] < 0.0 || atom.x[i][2] >= atom.box.zprd) nlost++;
+  for(i = 0; i < atom->nlocal; i++) {
+    if(atom->x[i][0] < 0.0 || atom->x[i][0] >= atom->box.xprd ||
+        atom->x[i][1] < 0.0 || atom->x[i][1] >= atom->box.yprd ||
+        atom->x[i][2] < 0.0 || atom->x[i][2] >= atom->box.zprd) nlost++;
   }
 
   int nlostall;
   MPI_Allreduce(&nlost, &nlostall, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 
-  if(natoms != atom.natoms || nlostall > 0) {
+  if(natoms != atom->natoms || nlostall > 0) {
     if(me == 0) printf("Atom counts = %d %d %d\n",
-                         nlostall, natoms, atom.natoms);
+                         nlostall, natoms, atom->natoms);
 
     if(me == 0) printf("ERROR: Incorrect number of atoms\n");
 
@@ -86,10 +86,10 @@ void output(In &in, Atom &atom, Force* force, Neighbor &neighbor, Comm &comm,
 
   /* long-range energy and pressure corrections Whats this???*/
 
-  double engcorr = 8.0 * 3.1415926 * in.rho *
-                   (1.0 / (9.0 * pow(force->cutforce, MMD_float(9.0))) - 1.0 / (3.0 * pow(force->cutforce, MMD_float(3.0))));
-  double prscorr = 8.0 * 3.1415926 * in.rho * in.rho *
-                   (4.0 / (9.0 * pow(force->cutforce, MMD_float(9.0))) - 2.0 / (3.0 * pow(force->cutforce, MMD_float(3.0))));
+  double engcorr = 8.0 * 3.1415926 * in->rho *
+                   (1.0 / (9.0 * pow(force->cutforce, (MMD_float)(9.0))) - 1.0 / (3.0 * pow(force->cutforce, (MMD_float)(3.0))));
+  double prscorr = 8.0 * 3.1415926 * in->rho * in->rho *
+                   (4.0 / (9.0 * pow(force->cutforce, (MMD_float)(9.0))) - 2.0 / (3.0 * pow(force->cutforce, (MMD_float)(3.0))));
 
   /* thermo output */
 
@@ -111,53 +111,53 @@ void output(In &in, Atom &atom, Force* force, Neighbor &neighbor, Comm &comm,
     if(screen_yaml) {
       fprintf(stdout, "run_configuration: \n");
       fprintf(stdout, "  variant: " VARIANT_STRING "\n");
-      fprintf(stdout, "  mpi_processes: %i\n", neighbor.threads->mpi_num_threads);
-      fprintf(stdout, "  threads: %i\n", neighbor.threads->omp_num_threads);
-      fprintf(stdout, "  datafile: %s\n", in.datafile ? in.datafile : "None");
-      fprintf(stdout, "  units: %s\n", in.units == 0 ? "LJ" : "METAL");
-      fprintf(stdout, "  atoms: %i\n", atom.natoms);
-      fprintf(stdout, "  system_size: %2.2lf %2.2lf %2.2lf\n", atom.box.xprd, atom.box.yprd, atom.box.zprd);
-      fprintf(stdout, "  unit_cells: %i %i %i\n", in.nx, in.ny, in.nz);
-      fprintf(stdout, "  density: %lf\n", in.rho);
-      fprintf(stdout, "  force_type: %s\n", in.forcetype == FORCELJ ? "LJ" : "EAM");
+      fprintf(stdout, "  mpi_processes: %i\n", neighbor->threads->mpi_num_threads);
+      fprintf(stdout, "  threads: %i\n", neighbor->threads->omp_num_threads);
+      fprintf(stdout, "  datafile: %s\n", in->datafile ? in->datafile : "None");
+      fprintf(stdout, "  units: %s\n", in->units == 0 ? "LJ" : "METAL");
+      fprintf(stdout, "  atoms: %i\n", atom->natoms);
+      fprintf(stdout, "  system_size: %2.2lf %2.2lf %2.2lf\n", atom->box.xprd, atom->box.yprd, atom->box.zprd);
+      fprintf(stdout, "  unit_cells: %i %i %i\n", in->nx, in->ny, in->nz);
+      fprintf(stdout, "  density: %lf\n", in->rho);
+      fprintf(stdout, "  force_type: %s\n", in->forcetype == FORCELJ ? "LJ" : "EAM");
       fprintf(stdout, "  force_cutoff: %lf\n", force->cutforce);
       fprintf(stdout, "  force_params: %2.2lf %2.2lf\n",force->epsilon,force->sigma);
-      fprintf(stdout, "  neighbor_cutoff: %lf\n", neighbor.cutneigh);
-      fprintf(stdout, "  neighbor_type: %i\n", neighbor.halfneigh);
-      fprintf(stdout, "  neighbor_bins: %i %i %i\n", neighbor.nbinx, neighbor.nbiny, neighbor.nbinz);
-      fprintf(stdout, "  neighbor_frequency: %i\n", neighbor.every);
-      fprintf(stdout, "  sort_frequency: %i\n", integrate.sort_every);
-      fprintf(stdout, "  timestep_size: %lf\n", integrate.dt);
-      fprintf(stdout, "  thermo_frequency: %i\n", thermo.nstat);
-      fprintf(stdout, "  ghost_newton: %i\n", neighbor.ghost_newton);
+      fprintf(stdout, "  neighbor_cutoff: %lf\n", neighbor->cutneigh);
+      fprintf(stdout, "  neighbor_type: %i\n", neighbor->halfneigh);
+      fprintf(stdout, "  neighbor_bins: %i %i %i\n", neighbor->nbinx, neighbor->nbiny, neighbor->nbinz);
+      fprintf(stdout, "  neighbor_frequency: %i\n", neighbor->every);
+      fprintf(stdout, "  sort_frequency: %i\n", integrate->sort_every);
+      fprintf(stdout, "  timestep_size: %lf\n", integrate->dt);
+      fprintf(stdout, "  thermo_frequency: %i\n", thermo->nstat);
+      fprintf(stdout, "  ghost_newton: %i\n", neighbor->ghost_newton);
       fprintf(stdout, "  use_intrinsics: %i\n", force->use_sse);
-      fprintf(stdout, "  safe_exchange: %i\n", comm.do_safeexchange);
+      fprintf(stdout, "  safe_exchange: %i\n", comm->do_safeexchange);
       fprintf(stdout, "  float_size: %i\n\n", sizeof(MMD_float));
     }
 
     fprintf(fp, "run_configuration: \n");
     fprintf(fp, "  variant: " VARIANT_STRING "\n");
-    fprintf(fp, "  mpi_processes: %i\n", neighbor.threads->mpi_num_threads);
-    fprintf(fp, "  threads: %i\n", neighbor.threads->omp_num_threads);
-    fprintf(fp, "  datafile: %s\n", in.datafile ? in.datafile : "None");
-    fprintf(fp, "  units: %s\n", in.units == 0 ? "LJ" : "METAL");
-    fprintf(fp, "  atoms: %i\n", atom.natoms);
-    fprintf(fp, "  system_size: %2.2lf %2.2lf %2.2lf\n", atom.box.xprd, atom.box.yprd, atom.box.zprd);
-    fprintf(fp, "  unit_cells: %i %i %i\n", in.nx, in.ny, in.nz);
-    fprintf(fp, "  density: %lf\n", in.rho);
-    fprintf(fp, "  force_type: %s\n", in.forcetype == FORCELJ ? "LJ" : "EAM");
+    fprintf(fp, "  mpi_processes: %i\n", neighbor->threads->mpi_num_threads);
+    fprintf(fp, "  threads: %i\n", neighbor->threads->omp_num_threads);
+    fprintf(fp, "  datafile: %s\n", in->datafile ? in->datafile : "None");
+    fprintf(fp, "  units: %s\n", in->units == 0 ? "LJ" : "METAL");
+    fprintf(fp, "  atoms: %i\n", atom->natoms);
+    fprintf(fp, "  system_size: %2.2lf %2.2lf %2.2lf\n", atom->box.xprd, atom->box.yprd, atom->box.zprd);
+    fprintf(fp, "  unit_cells: %i %i %i\n", in->nx, in->ny, in->nz);
+    fprintf(fp, "  density: %lf\n", in->rho);
+    fprintf(fp, "  force_type: %s\n", in->forcetype == FORCELJ ? "LJ" : "EAM");
     fprintf(fp, "  force_cutoff: %lf\n", force->cutforce);
     fprintf(fp, "  force_params: %2.2lf %2.2lf\n",force->epsilon,force->sigma);
-    fprintf(fp, "  neighbor_cutoff: %lf\n", neighbor.cutneigh);
-    fprintf(fp, "  neighbor_type: %i\n", neighbor.halfneigh);
-    fprintf(fp, "  neighbor_bins: %i %i %i\n", neighbor.nbinx, neighbor.nbiny, neighbor.nbinz);
-    fprintf(fp, "  neighbor_frequency: %i\n", neighbor.every);
-    fprintf(fp, "  sort_frequency: %i\n", integrate.sort_every);
-    fprintf(fp, "  timestep_size: %lf\n", integrate.dt);
-    fprintf(fp, "  thermo_frequency: %i\n", thermo.nstat);
-    fprintf(fp, "  ghost_newton: %i\n", neighbor.ghost_newton);
+    fprintf(fp, "  neighbor_cutoff: %lf\n", neighbor->cutneigh);
+    fprintf(fp, "  neighbor_type: %i\n", neighbor->halfneigh);
+    fprintf(fp, "  neighbor_bins: %i %i %i\n", neighbor->nbinx, neighbor->nbiny, neighbor->nbinz);
+    fprintf(fp, "  neighbor_frequency: %i\n", neighbor->every);
+    fprintf(fp, "  sort_frequency: %i\n", integrate->sort_every);
+    fprintf(fp, "  timestep_size: %lf\n", integrate->dt);
+    fprintf(fp, "  thermo_frequency: %i\n", thermo->nstat);
+    fprintf(fp, "  ghost_newton: %i\n", neighbor->ghost_newton);
     fprintf(fp, "  use_intrinsics: %i\n", force->use_sse);
-    fprintf(fp, "  safe_exchange: %i\n", comm.do_safeexchange);
+    fprintf(fp, "  safe_exchange: %i\n", comm->do_safeexchange);
     fprintf(fp, "  float_size: %i\n\n", sizeof(MMD_float));
 
     if(screen_yaml)
@@ -165,26 +165,26 @@ void output(In &in, Atom &atom, Force* force, Neighbor &neighbor, Comm &comm,
 
     fprintf(fp, "\n\nthermodynamic_output:\n");
 
-    for(i = 0; i < thermo.mstat; i++) {
-      conserve = (1.5 * thermo.tmparr[i] + thermo.engarr[i]) /
-                 (1.5 * thermo.tmparr[0] + thermo.engarr[0]);
+    for(i = 0; i < thermo->mstat; i++) {
+      conserve = (1.5 * thermo->tmparr[i] + thermo->engarr[i]) /
+                 (1.5 * thermo->tmparr[0] + thermo->engarr[0]);
 
       if(screen_yaml) {
-        fprintf(stdout, "  timestep: %d \n", thermo.steparr[i]);
-        fprintf(stdout, "      T*:           %15.10g \n", thermo.tmparr[i]);
+        fprintf(stdout, "  timestep: %d \n", thermo->steparr[i]);
+        fprintf(stdout, "      T*:           %15.10g \n", thermo->tmparr[i]);
         //fprintf(stdout,"      U*:           %15.10g \n", thermo.engarr[i]+engcorr);
         //fprintf(stdout,"      P*:           %15.10g \n", thermo.prsarr[i]+prscorr);
-        fprintf(stdout, "      U*:           %15.10g \n", thermo.engarr[i]);
-        fprintf(stdout, "      P*:           %15.10g \n", thermo.prsarr[i]);
+        fprintf(stdout, "      U*:           %15.10g \n", thermo->engarr[i]);
+        fprintf(stdout, "      P*:           %15.10g \n", thermo->prsarr[i]);
         fprintf(stdout, "      Conservation: %15.10g \n", conserve);
       }
 
-      fprintf(fp    , "  timestep: %d \n", thermo.steparr[i]);
-      fprintf(fp    , "      T*:           %15.10g \n", thermo.tmparr[i]);
+      fprintf(fp    , "  timestep: %d \n", thermo->steparr[i]);
+      fprintf(fp    , "      T*:           %15.10g \n", thermo->tmparr[i]);
       //fprintf(fp    ,"      U*:           %15.10g \n", thermo.engarr[i]+engcorr);
       //fprintf(fp    ,"      P*:           %15.10g \n", thermo.prsarr[i]+prscorr);
-      fprintf(fp    , "      U*:           %15.10g \n", thermo.engarr[i]);
-      fprintf(fp    , "      P*:           %15.10g \n", thermo.prsarr[i]);
+      fprintf(fp    , "      U*:           %15.10g \n", thermo->engarr[i]);
+      fprintf(fp    , "      P*:           %15.10g \n", thermo->prsarr[i]);
       fprintf(fp    , "      Conservation: %15.10g \n", conserve);
     }
   }
@@ -196,32 +196,32 @@ void output(In &in, Atom &atom, Force* force, Neighbor &neighbor, Comm &comm,
     fprintf(fp, "\n\n");
   }
 
-  double time_total = timer.array[TIME_TOTAL];
+  double time_total = timer->array[TIME_TOTAL];
   MPI_Allreduce(&time_total, &tmp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
   time_total = tmp / nprocs;
   double mflops = 4.0 / 3.0 * 3.1415926 *
-                  pow(force->cutforce, MMD_float(3.0)) * in.rho * 0.5 *
-                  23 * natoms * integrate.ntimes / time_total / 1000000.0;
+                  pow(force->cutforce, (MMD_float)(3.0)) * in->rho * 0.5 *
+                  23 * natoms * integrate->ntimes / time_total / 1000000.0;
 
   if(me == 0) {
     if(screen_yaml) {
       fprintf(stdout, "time:\n");
       fprintf(stdout, "  total:\n");
       fprintf(stdout, "    time: %g \n", time_total);
-      fprintf(stdout, "    performance: %10.5e \n", natoms * integrate.ntimes / time_total);
-      fprintf(stdout, "    performance_proc: %10.5e \n", natoms * integrate.ntimes / time_total / neighbor.threads->mpi_num_threads / neighbor.threads->omp_num_threads);
+      fprintf(stdout, "    performance: %10.5e \n", natoms * integrate->ntimes / time_total);
+      fprintf(stdout, "    performance_proc: %10.5e \n", natoms * integrate->ntimes / time_total / neighbor->threads->mpi_num_threads / neighbor->threads->omp_num_threads);
     }
 
     fprintf(fp,    "time:\n");
     fprintf(fp,    "  total:\n");
     fprintf(fp,    "    time: %g \n", time_total);
-    fprintf(fp,    "    performance: %10.5e \n", natoms * integrate.ntimes / time_total);
-    fprintf(fp,    "    performance_proc: %10.5e \n", natoms * integrate.ntimes / time_total / neighbor.threads->mpi_num_threads / neighbor.threads->omp_num_threads);
+    fprintf(fp,    "    performance: %10.5e \n", natoms * integrate->ntimes / time_total);
+    fprintf(fp,    "    performance_proc: %10.5e \n", natoms * integrate->ntimes / time_total / neighbor->threads->mpi_num_threads / neighbor->threads->omp_num_threads);
   }
 
   if(time_total == 0.0) time_total = 1.0;
 
-  double time_force = timer.array[TIME_FORCE];
+  double time_force = timer->array[TIME_FORCE];
   MPI_Allreduce(&time_force, &tmp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
   tmp /= nprocs;
 
@@ -232,7 +232,7 @@ void output(In &in, Atom &atom, Force* force, Neighbor &neighbor, Comm &comm,
     fprintf(fp,    "  force: %g\n", tmp);
   }
 
-  double time_neigh = timer.array[TIME_NEIGH];
+  double time_neigh = timer->array[TIME_NEIGH];
   MPI_Allreduce(&time_neigh, &tmp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
   tmp /= nprocs;
 
@@ -243,7 +243,7 @@ void output(In &in, Atom &atom, Force* force, Neighbor &neighbor, Comm &comm,
     fprintf(fp,    "  neigh: %g\n", tmp);
   }
 
-  double time_comm = timer.array[TIME_COMM];
+  double time_comm = timer->array[TIME_COMM];
   MPI_Allreduce(&time_comm, &tmp, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
   tmp /= nprocs;
 
@@ -366,7 +366,7 @@ void output(In &in, Atom &atom, Force* force, Neighbor &neighbor, Comm &comm,
     fprintf(fp, "\n");
   }
 
-  tmp = atom.nlocal;
+  tmp = atom->nlocal;
   stats(1, &tmp, &ave, &max, &min, 10, histo);
 
   if(me == 0) {
@@ -390,7 +390,7 @@ void output(In &in, Atom &atom, Force* force, Neighbor &neighbor, Comm &comm,
     fprintf(fp, "\n");
   }
 
-  tmp = atom.nghost;
+  tmp = atom->nghost;
   stats(1, &tmp, &ave, &max, &min, 10, histo);
 
   if(me == 0) {
@@ -416,7 +416,7 @@ void output(In &in, Atom &atom, Force* force, Neighbor &neighbor, Comm &comm,
 
   n = 0;
 
-  for(i = 0; i < comm.nswap; i++) n += comm.sendnum[i];
+  for(i = 0; i < comm->nswap; i++) n += comm->sendnum[i];
 
   tmp = n;
   stats(1, &tmp, &ave, &max, &min, 10, histo);
@@ -444,7 +444,7 @@ void output(In &in, Atom &atom, Force* force, Neighbor &neighbor, Comm &comm,
 
   n = 0;
 
-  for(i = 0; i < atom.nlocal; i++) n += neighbor.numneigh[i];
+  for(i = 0; i < atom->nlocal; i++) n += neighbor->numneigh[i];
 
   tmp = n;
   stats(1, &tmp, &ave, &max, &min, 10, histo);
@@ -523,7 +523,7 @@ void stats(int n, double* data, double* pave, double* pmax, double* pmin,
 
   for(i = 0; i < n; i++) {
     if(del == 0.0) m = 0;
-    else m = static_cast<int>((data[i] - min) / del * nhisto);
+    else m = (int)((data[i] - min) / del * nhisto);
 
     if(m > nhisto - 1) m = nhisto - 1;
 

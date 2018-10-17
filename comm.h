@@ -36,22 +36,8 @@
 #include "threadData.h"
 #include "timer.h"
 
-class Comm
+typedef struct
 {
-  public:
-    Comm();
-    ~Comm();
-    int setup(MMD_float, Atom &);
-    void communicate(Atom &);
-    void reverse_communicate(Atom &);
-    void exchange(Atom &);
-    void exchange_all(Atom &);
-    void borders(Atom &);
-    void growsend(int);
-    void growrecv(int);
-    void growlist(int, int);
-
-  public:
     int me;                           // my proc ID
     int nswap;                        // # of swaps to perform
     int* pbc_any;                     // whether any PBC on this swap
@@ -101,6 +87,19 @@ class Comm
     int nrecv_atoms;
 
 
-};
+}Comm;
+
+void Comm_init(Comm *);
+void Comm_destroy(Comm *);
+int Comm_setup(Comm *, MMD_float, Atom *);
+void Comm_communicate(Comm *, Atom *);
+void Comm_reverse_communicate(Comm *, Atom *);
+void Comm_exchange(Comm *, Atom *);
+void Comm_exchange_all(Comm *, Atom *);
+void Comm_borders(Comm *, Atom *);
+void Comm_growsend(Comm *, int);
+void Comm_growrecv(Comm *, int);
+void Comm_growlist(Comm *, int, int);
+
 
 #endif

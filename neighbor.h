@@ -36,9 +36,8 @@
 #include "threadData.h"
 #include "timer.h"
 
-class Neighbor
+typedef struct Neighbor_s
 {
-  public:
     int every;                       // re-neighbor every this often
     int nbinx, nbiny, nbinz;         // # of global bins
     MMD_float cutneigh;                 // neighbor cutoff
@@ -55,24 +54,18 @@ class Neighbor
 
     MMD_int ghost_newton;
     int count;
-    Neighbor();
-    ~Neighbor();
-    int setup(Atom &);               // setup bins based on box and cutoff
-    void build(Atom &);              // create neighbor list
 
     Timer* timer;
 
     ThreadData* threads;
 
-    // Atom is going to call binatoms etc for sorting
-    void binatoms(Atom & atom, int count = -1);           // bin all atoms
 
     int* bincount;                    // ptr to 1st atom in each bin
     int* bins;                       // ptr to next atom in each bin
     int mbins;                       // binning parameters
     int atoms_per_bin;
     int nmax;                        // max size of atom arrays in neighbor
-  private:
+
     MMD_float xprd, yprd, zprd;         // box size
 
 
@@ -86,8 +79,17 @@ class Neighbor
 
     int resize;
 
-    MMD_float bindist(int, int, int);   // distance between binx
-    inline int coord2bin(MMD_float, MMD_float, MMD_float) const;   // mapping atom coord to a bin
-};
+}Neighbor;
+
+void Neighbor_init(Neighbor *);
+void Neighbor_destroy(Neighbor *);
+int Neighbor_setup(Neighbor *, Atom *);               // setup bins based on box and cutoff
+void Neighbor_build(Neighbor *, Atom *);              // create neighbor list
+
+// Atom is going to call binatoms etc for sorting
+void Neighbor_binatoms(Neighbor *, Atom *atom, int count);           // bin all atoms
+
+MMD_float Neighbor_bindist(Neighbor *, int, int, int);   // distance between binx
+inline int Neighbor_coord2bin(Neighbor *, MMD_float, MMD_float, MMD_float);   // mapping atom coord to a bin
 
 #endif

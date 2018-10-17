@@ -40,27 +40,26 @@
 #define TIME_N     5
 
 #include "threadData.h"
-#include <ctime>
+//#include <ctime>
 
-class Timer
+typedef struct
 {
-  public:
-    Timer();
-    ~Timer();
-    void stamp();
-    void stamp(int);
-    void stamp_extra_start();
-    void stamp_extra_stop(int);
-    void barrier_start(int);
-    void barrier_stop(int);
     double* array;
 
-  private:
 #ifdef PREC_TIMER
     timespec previous_time, previous_time_extra;
 #endif
     double previous_time_d, previous_time_extra_d;
 
-};
+}Timer;
+
+void Timer_init(Timer *);
+void Timer_destroy(Timer *);
+void Timer_stamp(Timer *);
+void Timer_stamp_int(Timer *, int);
+void Timer_stamp_extra_start(Timer *);
+void Timer_stamp_extra_stop(Timer *, int);
+void Timer_barrier_start(Timer *, int);
+void Timer_barrier_stop(Timer *, int);
 
 #endif

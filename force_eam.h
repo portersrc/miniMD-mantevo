@@ -42,9 +42,43 @@
 #include "comm.h"
 #include "force.h"
 
-class ForceEAM : Force
+struct Funcfl {
+  char* file;
+  MMD_int nrho, nr;
+  double drho, dr, cut, mass;
+  MMD_float* frho, *rhor, *zr;
+};
+
+typedef struct
 {
-  public:
+
+    // FIXME
+    // This is really dirty and needs to be fixed. Notice that the C code
+    // actually assumes these members are at the top of this struct and
+    // in this order (e.g. force->threads). 
+    // begin copy-paste of Force struct
+        MMD_float cutforce;
+        MMD_float cutforcesq;
+        MMD_float eng_vdwl;
+        MMD_float mass;
+        MMD_int evflag;
+        MMD_float virial;
+
+
+        int use_sse;
+        int use_oldcompute;
+        ThreadData* threads;
+        MMD_int reneigh;
+        Timer* timer;
+
+        MMD_float epsilon, sigma6, sigma; //Parameters for LJ only
+
+        ForceStyle style;
+
+        MMD_int me;
+    // end copy-paste of Force struct
+
+
 
     // public variables so USER-ATC package can access them
 
@@ -61,23 +95,6 @@ class ForceEAM : Force
     MMD_float* rhor_spline, *frho_spline, *z2r_spline;
     MMD_float* d_rhor_spline, *d_frho_spline, *d_z2r_spline;
 
-    ForceEAM();
-    virtual ~ForceEAM();
-    virtual void compute(Atom &atom, Neighbor &neighbor, Comm &comm, int me);
-    virtual void coeff(char*);
-    virtual void setup(Atom &atom);
-    void init_style(Atom & atom);
-    MMD_float single(MMD_int, MMD_int, MMD_int, MMD_int, MMD_float, MMD_float, MMD_float, MMD_float &);
-
-    virtual MMD_int pack_comm(int n, int iswap, MMD_float* buf, MMD_int** asendlist);
-    virtual void unpack_comm(int n, int first, MMD_float* buf);
-    MMD_int pack_reverse_comm(MMD_int, MMD_int, MMD_float*);
-    void unpack_reverse_comm(MMD_int, MMD_int*, MMD_float*);
-    MMD_float memory_usage();
-
-  protected:
-    void compute_halfneigh(Atom &atom, Neighbor &neighbor, Comm &comm, int me);
-    void compute_fullneigh(Atom &atom, Neighbor &neighbor, Comm &comm, int me);
 
     // per-atom arrays
 
@@ -89,26 +106,39 @@ class ForceEAM : Force
 
     MMD_int* map;                   // which element each atom type maps to
 
-    struct Funcfl {
-      char* file;
-      MMD_int nrho, nr;
-      double drho, dr, cut, mass;
-      MMD_float* frho, *rhor, *zr;
-    };
-    Funcfl funcfl;
+    struct Funcfl funcfl;
 
-    void array2spline(Atom & atom);
-    void interpolate(MMD_int n, MMD_float delta, MMD_float* f, MMD_float* spline);
-    void grab(FILE*, MMD_int, MMD_float*);
-
-    virtual void read_file(char*);
-    virtual void file2array();
-
-    void bounds(char* str, int nmax, int &nlo, int &nhi);
-
-    void communicate(Atom &atom, Comm &comm);
-};
+}ForceEAM;
 
 
+ForceEAM *ForceEAM_alloc();
+void ForceEAM_free(ForceEAM *);
+
+void ForceEAM_compute(ForceEAM *, Atom *atom, Neighbor *neighbor, Comm *comm, int me);
+void ForceEAM_coeff(ForceEAM *, char*);
+void ForceEAM_setup(ForceEAM *, Atom *atom);
+void ForceEAM_init_style(ForceEAM *, Atom * atom);
+MMD_float ForceEAM_single(ForceEAM *, MMD_int, MMD_int, MMD_int, MMD_int, MMD_float, MMD_float, MMD_float, MMD_float *);
+
+MMD_int ForceEAM_pack_comm(ForceEAM *, int n, int iswap, MMD_float* buf, MMD_int** asendlist);
+void ForceEAM_unpack_comm(ForceEAM *, int n, int first, MMD_float* buf);
+MMD_int ForceEAM_pack_reverse_comm(ForceEAM *, MMD_int, MMD_int, MMD_float*);
+void ForceEAM_unpack_reverse_comm(ForceEAM *, MMD_int, MMD_int*, MMD_float*);
+MMD_float ForceEAM_memory_usage(ForceEAM *);
+
+void ForceEAM_compute_halfneigh(ForceEAM *, Atom *atom, Neighbor *neighbor, Comm *comm, int me);
+void ForceEAM_compute_fullneigh(ForceEAM *, Atom *atom, Neighbor *neighbor, Comm *comm, int me);
+
+void ForceEAM_array2spline(ForceEAM *, Atom * atom);
+void ForceEAM_interpolate(ForceEAM *, MMD_int n, MMD_float delta, MMD_float* f, MMD_float* spline);
+void ForceEAM_grab(ForceEAM *, FILE*, MMD_int, MMD_float*);
+
+void ForceEAM_read_file(ForceEAM *, char*);
+void ForceEAM_file2array(ForceEAM *);
+
+void ForceEAM_bounds(ForceEAM *, char* str, int nmax, int *nlo, int *nhi);
+
+void ForceEAM_communicate(ForceEAM *, Atom *atom, Comm *comm);
 
 #endif
+

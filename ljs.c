@@ -32,6 +32,7 @@
 #include "stdio.h"
 #include "stdlib.h"
 #include "mpi.h"
+#include <assert.h>
 
 #include "variant.h"
 #include "ljs.h"
@@ -51,13 +52,13 @@
 
 #define MAXLINE 256
 
-int input(In &, char*);
-void create_box(Atom &, int, int, int, double);
-int create_atoms(Atom &, int, int, int, double);
-void create_velocity(double, Atom &, Thermo &);
-void output(In &, Atom &, Force*, Neighbor &, Comm &,
-            Thermo &, Integrate &, Timer &, int);
-int read_lammps_data(Atom &atom, Comm &comm, Neighbor &neighbor, Integrate &integrate, Thermo &thermo, char* file, int units);
+int input(In *, char*);
+void create_box(Atom *, int, int, int, double);
+int create_atoms(Atom *, int, int, int, double);
+void create_velocity(double, Atom *, Thermo *);
+void output(In *, Atom *, Force*, Neighbor *, Comm *,
+            Thermo *, Integrate *, Timer *, int);
+int read_lammps_data(Atom *atom, Comm *comm, Neighbor *neighbor, Integrate *integrate, Thermo *thermo, char* file, int units);
 
 int main(int argc, char** argv)
 {
@@ -150,9 +151,9 @@ int main(int argc, char** argv)
   int error = 0;
 
   if(input_file == NULL)
-    error = input(in, "in.lj.miniMD");
+    error = input(&in, "in.lj.miniMD");
   else
-    error = input(in, input_file);
+    error = input(&in, input_file);
 
   if(error) {
     MPI_Finalize();
@@ -234,7 +235,7 @@ int main(int argc, char** argv)
     }
 
     if((strcmp(argv[i], "-f") == 0) || (strcmp(argv[i], "--data_file") == 0)) {
-      if(in.datafile == NULL) in.datafile = new char[1000];
+      if(in.datafile == NULL) in.datafile = malloc(sizeof(char) * 1000);
 
       strcpy(in.datafile, argv[++i]);
       continue;
@@ -319,8 +320,23 @@ int main(int argc, char** argv)
 
   Force* force;
 
+  Atom_init(&atom);
+  Neighbor_init(&neighbor);
+  Integrate_init(&integrate);
+  Thermo_init(&thermo);
+  Comm_init(&comm);
+  Timer_init(&timer);
+  
+  //ThreadData_init(&threads);
+  {
+    threads.mpi_me = 0;
+    threads.mpi_num_threads = 0;
+    threads.omp_me = 0;
+    threads.omp_num_threads = 1;
+  }
+
   if(in.forcetype == FORCEEAM) {
-    force = (Force*) new ForceEAM();
+    force = (Force*) ForceEAM_alloc();
 
     if(ghost_newton == 1) {
       if(me == 0)
@@ -330,7 +346,7 @@ int main(int argc, char** argv)
     }
   }
 
-  if(in.forcetype == FORCELJ) force = (Force*) new ForceLJ();
+  if(in.forcetype == FORCELJ) force = (Force*) ForceLJ_alloc();
 
   threads.mpi_me = me;
   threads.mpi_num_threads = nprocs;
@@ -427,29 +443,39 @@ int main(int argc, char** argv)
     printf("# Create System:\n");
 
   if(in.datafile) {
-    read_lammps_data(atom, comm, neighbor, integrate, thermo, in.datafile, in.units);
+    read_lammps_data(&atom, &comm, &neighbor, &integrate, &thermo, in.datafile, in.units);
     MMD_float volume = atom.box.xprd * atom.box.yprd * atom.box.zprd;
     in.rho = 1.0 * atom.natoms / volume;
-    force->setup(atom);
-
-    if(in.forcetype == FORCEEAM) atom.mass = force->mass;
+    if(in.forcetype == FORCELJ) {
+      ForceLJ_setup((ForceLJ *) force, &atom);
+    } else if (in.forcetype == FORCEEAM) {
+      ForceEAM_setup((ForceEAM *) force, &atom);
+      atom.mass = force->mass;
+    } else {
+      assert(0);
+    }
   } else {
-    create_box(atom, in.nx, in.ny, in.nz, in.rho);
+    create_box(&atom, in.nx, in.ny, in.nz, in.rho);
 
-    comm.setup(neighbor.cutneigh, atom);
+    Comm_setup(&comm, neighbor.cutneigh, &atom);
 
-    neighbor.setup(atom);
+    Neighbor_setup(&neighbor, &atom);
 
-    integrate.setup();
+    Integrate_setup(&integrate);
 
-    force->setup(atom);
+    if(in.forcetype == FORCELJ) {
+      ForceLJ_setup((ForceLJ *) force, &atom);
+    } else if (in.forcetype == FORCEEAM) {
+      ForceEAM_setup((ForceEAM *) force, &atom);
+      atom.mass = force->mass;
+    } else {
+      assert(0);
+    }
 
-    if(in.forcetype == FORCEEAM) atom.mass = force->mass;
+    create_atoms(&atom, in.nx, in.ny, in.nz, in.rho);
+    Thermo_setup(&thermo, in.rho, (struct Integrate_s *) &integrate, &atom, (MMD_int)(in.units));
 
-    create_atoms(atom, in.nx, in.ny, in.nz, in.rho);
-    thermo.setup(in.rho, integrate, atom, in.units);
-
-    create_velocity(in.t_request, atom, thermo);
+    create_velocity(in.t_request, &atom, &thermo);
 
   }
 
@@ -485,25 +511,31 @@ int main(int argc, char** argv)
     fprintf(stdout, "\t# Size of float: %i\n\n", sizeof(MMD_float));
   }
 
-  comm.exchange(atom);
+  Comm_exchange(&comm, &atom);
   //if(sort>0)
     //atom.sort(neighbor);
-  comm.borders(atom);
+  Comm_borders(&comm, &atom);
 
   force->evflag = 1;
   
   {
     printf("Neighbuild\n");
-    neighbor.build(atom);
-    atom.sync_device(atom.d_x,&atom.x[0][0],atom.nmax*3*sizeof(MMD_float));
+    Neighbor_build(&neighbor, &atom);
+    Atom_sync_device(&atom, atom.d_x, &atom.x[0][0], atom.nmax*3*sizeof(MMD_float));
     printf("Compute\n"); 
-    force->compute(atom, neighbor, comm, me);
+    if(in.forcetype == FORCELJ) {
+      ForceLJ_compute((ForceLJ *) force, &atom, &neighbor, &comm, me);
+    } else if (in.forcetype == FORCEEAM) {
+      ForceEAM_compute((ForceEAM *) force, &atom, &neighbor, &comm, me);
+    } else {
+      assert(0);
+    }
     printf("Compute Done\n"); 
     //atom.sync_host(&atom.f[0][0],atom.d_f,atom.nmax*3*sizeof(MMD_float));
   }
   
   if(neighbor.halfneigh && neighbor.ghost_newton)
-    comm.reverse_communicate(atom);
+    Comm_reverse_communicate(&comm, &atom);
 
   if(me == 0) printf("# Starting dynamics ...\n");
 
@@ -511,23 +543,29 @@ int main(int argc, char** argv)
 
   
   {
-    thermo.compute(0, atom, neighbor, force, timer, comm);
+    Thermo_compute(&thermo, 0, &atom, &neighbor, force, &timer, &comm);
   }
 
-  timer.barrier_start(TIME_TOTAL);
-  integrate.run(atom, force, neighbor, comm, thermo, timer);
-  timer.barrier_stop(TIME_TOTAL);
+  Timer_barrier_start(&timer, TIME_TOTAL);
+  Integrate_run(&integrate, &atom, force, &neighbor, &comm, &thermo, &timer);
+  Timer_barrier_stop(&timer, TIME_TOTAL);
 
   int natoms;
   MPI_Allreduce(&atom.nlocal, &natoms, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 
   force->evflag = 1;
-  force->compute(atom, neighbor, comm, me);
+  if(in.forcetype == FORCELJ) {
+    ForceLJ_compute((ForceLJ *) force, &atom, &neighbor, &comm, me);
+  } else if (in.forcetype == FORCEEAM) {
+    ForceEAM_compute((ForceEAM *) force, &atom, &neighbor, &comm, me);
+  } else {
+    assert(0);
+  }
 
   if(neighbor.halfneigh && neighbor.ghost_newton)
-    comm.reverse_communicate(atom);
+    Comm_reverse_communicate(&comm, &atom);
 
-  thermo.compute(-1, atom, neighbor, force, timer, comm);
+  Thermo_compute(&thermo, -1, &atom, &neighbor, force, &timer, &comm);
 
   if(me == 0) {
     double time_other = timer.array[TIME_TOTAL] - timer.array[TIME_FORCE] - timer.array[TIME_NEIGH] - timer.array[TIME_COMM];
@@ -542,9 +580,15 @@ int main(int argc, char** argv)
   }
 
   if(yaml_output)
-    output(in, atom, force, neighbor, comm, thermo, integrate, timer, screen_yaml);
+    output(&in, &atom, force, &neighbor, &comm, &thermo, &integrate, &timer, screen_yaml);
 
-  delete force;
+  if(in.forcetype == FORCELJ) {
+    ForceLJ_free((ForceLJ *) force);
+  } else if (in.forcetype == FORCEEAM) {
+    ForceEAM_free((ForceEAM *) force);
+  } else {
+    assert(0);
+  }
   MPI_Barrier(MPI_COMM_WORLD);
   MPI_Finalize();
   return 0;
