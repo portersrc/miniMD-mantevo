@@ -162,7 +162,7 @@ void Integrate_run(Integrate *ig, Atom *atom, Force *force, Neighbor *neighbor,
       force->evflag = (n + 1) % thermo->nstat == 0;
       if(force->style == FORCELJ) {
         ForceLJ_compute(force, atom, neighbor, comm, comm->me);
-      } else if(force->style == FORCELJ) {
+      } else if(force->style == FORCEEAM) {
         ForceEAM_compute(force, atom, neighbor, comm, comm->me);
       } else{
         assert(0);
